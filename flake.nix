@@ -11,10 +11,12 @@
 
   outputs = inputs @ {
     self,
+    nixpkgs,
     treefmt,
     ...
   }: let
-    lib = import ./lib inputs;
+    mkLib = import ./lib;
+    lib = mkLib nixpkgs;
     inherit (builtins) mapAttrs;
     # Systems to support
     systems = [
@@ -36,5 +38,6 @@
       checks = pkgs: {
         formatting = treefmt'.${pkgs.system}.config.build.check self;
       };
-    };
+    }
+    // {inherit mkLib;};
 }
