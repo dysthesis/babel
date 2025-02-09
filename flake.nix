@@ -3,7 +3,7 @@
 
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs?ref=nixos-unstable";
-    treefmt-nix = {
+    treefmt = {
       url = "github:numtide/treefmt-nix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
@@ -11,7 +11,7 @@
 
   outputs = inputs @ {
     self,
-    treefmt-nix,
+    treefmt,
     ...
   }: let
     lib = import ./lib inputs;
@@ -25,16 +25,16 @@
     ];
     forAllSystems = lib.poincare.forAllSystems systems;
 
-    treefmt = forAllSystems (pkgs: treefmt-nix.lib.evalModule pkgs ./formatters);
+    treefmt' = forAllSystems (pkgs: treefmt.lib.evalModule pkgs ./formatters);
   in
     # Budget flake-parts
     mapAttrs (_: forAllSystems) {
       devShells = pkgs: {default = import ./shell pkgs;};
       # for `nix fmt`
-      formatter = pkgs: treefmt.${pkgs.system}.config.build.wrapper;
+      formatter = pkgs: treefmt'.${pkgs.system}.config.build.wrapper;
       # for `nix flake check`
       checks = pkgs: {
-        formatting = treefmt.${pkgs.system}.config.build.check self;
+        formatting = treefmt'.${pkgs.system}.config.build.check self;
       };
     };
 }
