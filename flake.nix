@@ -17,6 +17,7 @@
   }: let
     mkLib = import ./lib;
     lib = mkLib nixpkgs;
+
     inherit (builtins) mapAttrs;
     # Systems to support
     systems = [
@@ -25,7 +26,7 @@
       "x86_64-darwin"
       "aarch64-darwin"
     ];
-    forAllSystems = lib.poincare.forAllSystems systems;
+    forAllSystems = lib.babel.forAllSystems systems;
 
     treefmt' = forAllSystems (pkgs: treefmt.lib.evalModule pkgs ./formatters);
   in
