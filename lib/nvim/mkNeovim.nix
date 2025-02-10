@@ -1,5 +1,6 @@
-path: 
 {
+	# Where to find the Neovim config directory
+  path,
   pkgs,
   # How many lines from the bottom of `init.lua` to trin
   trimLines ? 0,
