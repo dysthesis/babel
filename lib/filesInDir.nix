@@ -13,4 +13,4 @@ in dir: dir
 			|> readDir
 			|> filterAttrs (_name: value: value == "regular")
 			|> attrNames
-			|> (xs: map (x: "${dir}/${x}") xs);
+			|> (xs: map (x: "${dir}/${x}") xs)
