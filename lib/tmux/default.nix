@@ -1,0 +1,3 @@
+{
+  mkTmuxConfig = import ./mkTmuxConfig.nix;
+}

@@ -3,5 +3,6 @@ nixpkgs.lib.extend (_final: _prev: {
   babel = {
     forAllSystems = import ./forAllSystems.nix nixpkgs;
     nvim = import ./nvim _final;
+    tmux = import ./tmux;
   };
 })
