@@ -11,5 +11,14 @@
     overlays = [overlay];
   };
 in {
-  inherit (pkgs') sf-pro georgia-fonts cartograph-nf jbcustom-nf oledppuccin-tmux ropr;
+  inherit
+    (pkgs')
+    sf-pro
+    georgia-fonts
+    generate-domains-blocklist
+    cartograph-nf
+    jbcustom-nf
+    oledppuccin-tmux
+    ropr
+    ;
 }
