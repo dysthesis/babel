@@ -1,6 +1,6 @@
 nixpkgs:
 nixpkgs.lib.extend (_final: _prev: {
-  poincare = {
+  babel = {
     forAllSystems = import ./forAllSystems.nix nixpkgs;
     nvim = import ./nvim _final;
   };
