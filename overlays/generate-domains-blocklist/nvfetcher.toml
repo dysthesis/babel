@@ -1,0 +1,4 @@
+[dnscrypt-proxy-utils]
+src.github = "DNSCrypt/dnscrypt-proxy"
+fetch.github = "DNSCrypt/dnscrypt-proxy"
+git.sparseCheckout = [ "utils/generate-domains-blocklist" ]

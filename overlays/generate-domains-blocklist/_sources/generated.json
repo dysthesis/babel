@@ -1,0 +1,22 @@
+{
+  "dnscrypt-proxy-utils": {
+    "cargoLocks": null,
+    "date": null,
+    "extract": null,
+    "name": "dnscrypt-proxy-utils",
+    "passthru": null,
+    "pinned": false,
+    "src": {
+      "deepClone": false,
+      "fetchSubmodules": false,
+      "leaveDotGit": false,
+      "name": null,
+      "owner": "DNSCrypt",
+      "repo": "dnscrypt-proxy",
+      "rev": "2.1.5",
+      "sha256": "sha256-A9Cu4wcJxrptd9CpgXw4eyMX2nmNAogYBRDeeAjpEZY=",
+      "type": "github"
+    },
+    "version": "2.1.5"
+  }
+}

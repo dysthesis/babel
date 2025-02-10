@@ -14,7 +14,7 @@
     nixpkgs,
     treefmt,
     ...
-  }: let
+  } @ inputs: let
     mkLib = import ./lib;
     lib = mkLib nixpkgs;
 
@@ -39,6 +39,9 @@
       checks = pkgs: {
         formatting = treefmt'.${pkgs.system}.config.build.check self;
       };
+
+      overlays = pkgs: import ./overlays pkgs;
+      packages = pkgs: import ./packages {inherit inputs self pkgs;};
     }
     // {inherit mkLib;};
 }
