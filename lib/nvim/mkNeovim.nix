@@ -142,7 +142,7 @@
   # and prepends the nvim and after directory to the RTP
   initLua = let
     init-lua =
-      ../../init.lua
+      "${path}/init.lua"
 			|> readFile
 			|> (s: splitString "\n" s)
 			|>(lines: take (length lines - trimLines) lines)
