@@ -1,0 +1,3 @@
+{
+  hr = import ./hr.nix;
+}

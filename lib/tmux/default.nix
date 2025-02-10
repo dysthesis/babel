@@ -1,3 +1,3 @@
-{
-  mkTmuxConfig = import ./mkTmuxConfig.nix;
+lib: {
+  mkTmuxConfig = import ./mkTmuxConfig.nix lib;
 }

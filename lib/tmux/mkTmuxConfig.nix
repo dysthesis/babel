@@ -1,19 +1,7 @@
 # Originally from
 # https://github.com/jakehamilton/tmux/blob/7c353d3831231f4e358c3692a8cac76924381c05/lib/default.nix
-let
-  # Replace dots ('.') with dashes ('-') in `test`
-  hr = text: let
-    parts = builtins.split "." text;
-  in
-    builtins.foldl'
-    (
-      text: part:
-        if builtins.isList part
-        then "${text}-"
-        else text
-    )
-    ""
-    (builtins.tail parts);
+lib: let
+  inherit (lib.babel.text) hr;
 in
   # Create a tmux configuration file.
   # Type: Attrs -> Path
