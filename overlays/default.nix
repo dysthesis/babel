@@ -8,4 +8,6 @@ in {
   jbcustom-nf = callPackage ./jbcustom-nf {};
   oledppuccin-tmux = callPackage ./oledppuccin-tmux {};
   ropr = callPackage ./ropr {};
+  # Broken for darwin
+  ghostty-hardened = callPackage ./ghostty-hardened {};
 }

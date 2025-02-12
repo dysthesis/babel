@@ -20,5 +20,6 @@ in {
     jbcustom-nf
     oledppuccin-tmux
     ropr
+    ghostty-hardened
     ;
 }
