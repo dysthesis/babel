@@ -25,8 +25,8 @@ in
           {nixpkgs.hostPlatform = mkDefault system;}
           {
             imports = [
-              "${profilesPath}/minimal"
-              "${profilesPath}/hardened"
+              "${profilesPath}/minimal.nix"
+              "${profilesPath}/hardened.nix"
             ];
           }
         ]
