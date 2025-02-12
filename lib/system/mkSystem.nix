@@ -12,23 +12,23 @@ in
     config,
     inputs,
     specialArgs,
-    modulesPath,
     ...
   }:
     nixosSystem {
       inherit system;
-      modules = let
-        profilesPath = "${modulesPath}/profiles";
-      in
+      modules =
         [
           {networking.hostName = hostname;}
           {nixpkgs.hostPlatform = mkDefault system;}
-          {
+
+          ({modulesPath, ...}: let
+            profilesPath = "${modulesPath}/profiles";
+          in {
             imports = [
               "${profilesPath}/minimal.nix"
               "${profilesPath}/hardened.nix"
             ];
-          }
+          })
         ]
         ++ config;
       specialArgs = {inherit self inputs;} // specialArgs;
