@@ -16,20 +16,19 @@ in
   }:
     nixosSystem {
       inherit system;
-      modules =
-        [
-          {networking.hostName = hostname;}
-          {nixpkgs.hostPlatform = mkDefault system;}
+      modules = [
+        {networking.hostName = hostname;}
+        {nixpkgs.hostPlatform = mkDefault system;}
 
-          ({modulesPath, ...}: let
-            profilesPath = "${modulesPath}/profiles";
-          in {
-            imports = [
-              "${profilesPath}/minimal.nix"
-              "${profilesPath}/hardened.nix"
-            ];
-          })
-        ]
-        ++ config;
+        ({modulesPath, ...}: let
+          profilesPath = "${modulesPath}/profiles";
+        in {
+          imports = [
+            "${profilesPath}/minimal.nix"
+            "${profilesPath}/hardened.nix"
+          ];
+        })
+        config
+      ];
       specialArgs = {inherit self inputs;} // specialArgs;
     }
