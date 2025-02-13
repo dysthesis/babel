@@ -10,6 +10,7 @@ nixpkgs.lib.extend (
       system = import ./system _final;
       path = import ./path _final;
       modules = import ./modules _final;
+      pkgs = import ./pkgs;
     };
   }
 )
