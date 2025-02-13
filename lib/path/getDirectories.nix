@@ -1,16 +1,10 @@
-lib: let
-  inherit
-    (builtins)
+lib:
+let
+  inherit (builtins)
     readDir
-    attrNames
     ;
-  inherit
-    (lib)
+  inherit (lib)
     filterAttrs
     ;
 in
-  dir:
-    dir
-		|> readDir
-		|> filterAttrs (_name: value: value == "directory")
-		|> attrNames
+dir: dir |> readDir |> filterAttrs (_name: value: value == "directory") |> attrNames

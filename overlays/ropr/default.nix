@@ -1,5 +1,5 @@
 {
-  pkgs ? import <nixpkgs> {},
+  pkgs ? import <nixpkgs> { },
   fetchFromGitHub,
 }:
 pkgs.rustPlatform.buildRustPackage rec {
