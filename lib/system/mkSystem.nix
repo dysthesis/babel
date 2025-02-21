@@ -15,25 +15,25 @@ in
     config,
     inputs,
     specialArgs,
+    modulesPath,
     profiles ? [],
     ...
   }:
     nixosSystem {
-      inherit system;
+      inherit system modulesPath;
       modules = [
         {networking.hostName = hostname;}
         {nixpkgs.hostPlatform = mkDefault system;}
 
-        (
-          {modulesPath, ...}: let
-            profilesPath = "${modulesPath}/profiles";
-            validProfiles = map (removeSuffix ".nix") (getFiles profilesPath);
-          in
-            (checkListOfEnum "valid modules" validProfiles profiles)
-            {
-              imports = map profiles (profile: "${profilesPath}/${profile}.nix");
-            }
-        )
+        (let
+          profilesPath = "${modulesPath}/profiles";
+          validProfiles = map (removeSuffix ".nix") (getFiles profilesPath);
+        in
+          (checkListOfEnum "valid modules" validProfiles profiles)
+          {
+            imports = map profiles (profile: "${profilesPath}/${profile}.nix");
+          })
+
         config
       ];
       specialArgs =
