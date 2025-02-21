@@ -1,4 +1,4 @@
 lib: let
   inherit (lib.babel.path) getItemsOfType;
 in
-  dir: getItemsOfType dir "directory"
+  dir: getItemsOfType dir "regular"

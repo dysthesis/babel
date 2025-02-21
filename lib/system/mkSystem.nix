@@ -4,8 +4,9 @@ lib: let
     nixosSystem
     mkDefault
     checkListOfEnum
+		removeSuffix
     ;
-  inherit (lib.babel.path) getDirectories;
+  inherit (lib.babel.path) getFiles;
 in
   {
     self,
@@ -26,7 +27,9 @@ in
         (
           {modulesPath, ...}: let
             profilesPath = "${modulesPath}/profiles";
-            validProfiles = getDirectories profilesPath;
+            validProfiles = profilesPath
+						                |> getFiles
+														|> removeSuffix ".nix";
           in
             builtins.trace "Valid profiles are: ${toString validProfiles}\nIn the directory: ${toString profilesPath}"
             (checkListOfEnum "valid modules" validProfiles profiles)
