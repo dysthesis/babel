@@ -3,7 +3,9 @@ let
   inherit (lib)
     nixosSystem
     mkDefault
+    checkListOfEnum
     ;
+  inherit (lib.babel.path) getDirectories;
 in
 {
   self,
@@ -12,9 +14,13 @@ in
   config,
   inputs,
   specialArgs,
+  profiles ? [ ],
   ...
 }:
-nixosSystem {
+let
+  validModules = getDirectories "${modulesPath/profiles}";
+in
+checkListOfEnum "valid modules" profiles validModules nixosSystem {
   inherit system;
   modules = [
     { networking.hostName = hostname; }
@@ -26,10 +32,7 @@ nixosSystem {
         profilesPath = "${modulesPath}/profiles";
       in
       {
-        imports = [
-          "${profilesPath}/minimal.nix"
-          "${profilesPath}/hardened.nix"
-        ];
+        imports = map profiles (profile: "${profilesPath}/${profile}.nix");
       }
     )
     config
