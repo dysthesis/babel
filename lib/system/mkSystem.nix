@@ -31,7 +31,6 @@ in
 						                |> getFiles
 														|> removeSuffix ".nix";
           in
-            builtins.trace "Valid profiles are: ${toString validProfiles}\nIn the directory: ${toString profilesPath}"
             (checkListOfEnum "valid modules" validProfiles profiles)
             {
               imports = map profiles (profile: "${profilesPath}/${profile}.nix");
