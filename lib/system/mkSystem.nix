@@ -4,7 +4,7 @@ lib: let
     nixosSystem
     mkDefault
     checkListOfEnum
-		removeSuffix
+    removeSuffix
     ;
   inherit (lib.babel.path) getFiles;
 in
@@ -27,9 +27,7 @@ in
         (
           {modulesPath, ...}: let
             profilesPath = "${modulesPath}/profiles";
-            validProfiles = profilesPath
-						                |> getFiles
-														|> map (removeSuffix ".nix");
+            validProfiles = map (removeSuffix ".nix") (getFiles profilesPath);
           in
             (checkListOfEnum "valid modules" validProfiles profiles)
             {
