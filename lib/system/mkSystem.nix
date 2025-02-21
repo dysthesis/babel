@@ -15,17 +15,16 @@ in
     config,
     inputs,
     specialArgs,
-    modulesPath,
     profiles ? [],
     ...
   }:
     nixosSystem {
-      inherit system modulesPath;
+      inherit system;
       modules = [
         {networking.hostName = hostname;}
         {nixpkgs.hostPlatform = mkDefault system;}
 
-        (let
+        ({modulesPath, ...}: let
           profilesPath = "${modulesPath}/profiles";
           validProfiles = map (removeSuffix ".nix") (getFiles profilesPath);
         in
@@ -33,7 +32,6 @@ in
           {
             imports = map profiles (profile: "${profilesPath}/${profile}.nix");
           })
-
         config
       ];
       specialArgs =
