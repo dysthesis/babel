@@ -2,6 +2,7 @@ lib:
 let
   inherit (builtins)
     readDir
+		attrNames
     ;
   inherit (lib)
     filterAttrs
