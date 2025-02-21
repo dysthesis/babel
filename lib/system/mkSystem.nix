@@ -30,7 +30,7 @@ in
         in
           (checkListOfEnum "valid modules" validProfiles profiles)
           {
-            imports = map profiles (profile: "${profilesPath}/${profile}.nix");
+            imports = map (profile: "${profilesPath}/${profile}.nix") profiles;
           })
         config
       ];
