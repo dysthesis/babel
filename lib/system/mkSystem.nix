@@ -28,7 +28,9 @@ in
             profilesPath = "${modulesPath}/profiles";
             validProfiles = getDirectories profilesPath;
           in
-            checkListOfEnum "valid modules" validProfiles profiles {
+            builtins.trace "Valid profiles are: ${toString validProfiles}"
+            (checkListOfEnum "valid modules" validProfiles profiles)
+            {
               imports = map profiles (profile: "${profilesPath}/${profile}.nix");
             }
         )
