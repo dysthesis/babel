@@ -29,7 +29,7 @@ in
             profilesPath = "${modulesPath}/profiles";
             validProfiles = profilesPath
 						                |> getFiles
-														|> map (removeSuffix ".nix");
+														|> map (x: removeSuffix ".nix" x);
           in
             (checkListOfEnum "valid modules" validProfiles profiles)
             {
