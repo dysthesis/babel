@@ -17,10 +17,7 @@ in
   profiles ? [ ],
   ...
 }:
-let
-  validModules = getDirectories "${modulesPath/profiles}";
-in
-checkListOfEnum "valid modules" profiles validModules nixosSystem {
+nixosSystem {
   inherit system;
   modules = [
     { networking.hostName = hostname; }
@@ -30,8 +27,9 @@ checkListOfEnum "valid modules" profiles validModules nixosSystem {
       { modulesPath, ... }:
       let
         profilesPath = "${modulesPath}/profiles";
+        validModules = getDirectories profilesPath;
       in
-      {
+      checkListOfEnum "valid modules" profiles validModules {
         imports = map profiles (profile: "${profilesPath}/${profile}.nix");
       }
     )
