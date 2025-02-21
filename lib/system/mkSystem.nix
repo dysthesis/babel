@@ -28,8 +28,7 @@ in
           {modulesPath, ...}: let
             profilesPath = "${modulesPath}/profiles";
             validProfiles = profilesPath
-						                |> getFiles
-														|> map (name: removeSuffix ".nix" name);
+						                |> getFiles;
           in
             (checkListOfEnum "valid modules" validProfiles profiles)
             {
