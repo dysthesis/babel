@@ -1,8 +1,8 @@
-nixpkgs: {
+pkgs: {
   overlays ? [],
-  systems,
+  systems ? [],
 }: f:
-nixpkgs.lib.genAttrs systems (system: let
-  pkgs = import nixpkgs {inherit system overlays;};
+pkgs.lib.genAttrs systems (system: let
+  pkgs' = import pkgs {inherit system overlays;};
 in
-  f pkgs)
+  f pkgs')
