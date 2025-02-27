@@ -1,5 +1,5 @@
-{
-  nixpkgs,
+nixpkgs: {
+  pkgs ? nixpkgs,
   overlays ? [],
   systems ? [],
 }: f:
