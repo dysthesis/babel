@@ -2,7 +2,7 @@ nixpkgs:
 nixpkgs.lib.extend (
   _final: _prev: {
     babel = {
-      forAllSystems = import ./forAllSystems.nix nixpkgs;
+      forAllSystems = import ./forAllSystems.nix {inherit nixpkgs;};
       filesInDir = import ./filesInDir.nix _final;
       nvim = import ./nvim _final;
       tmux = import ./tmux _final;
