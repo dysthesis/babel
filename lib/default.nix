@@ -11,6 +11,7 @@ nixpkgs.lib.extend (
       path = import ./path _final;
       modules = import ./modules _final;
       pkgs = import ./pkgs;
+      int = import ./int;
     };
   }
 )

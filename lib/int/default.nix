@@ -1,0 +1,3 @@
+{
+  scale = import ./scale.nix;
+}
