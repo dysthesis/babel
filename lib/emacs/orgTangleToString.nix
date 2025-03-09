@@ -9,7 +9,7 @@ lib: pkgs: emacs: let
 in orgFile: let
   tangleResults = orgTangle pkgs emacs orgFile "tangle-output";
 in 
-  tangleResults
+  "${tangleResults}"
 	|> readDir
 	|> attrNames
 	|> fold (curr: acc: let
