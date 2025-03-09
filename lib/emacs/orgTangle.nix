@@ -7,10 +7,9 @@ pkgs.stdenv.mkDerivation {
     cp $src output.org
   '';
   buildPhase = ''
-    emacs --batch -Q \
-      --eval "(require 'org)" \
-      --eval "(require 'ob-tangle)" \
-      --eval "(org-babel-tangle \"output.org\")"
+    emacs --batch \
+     -l org output.org \
+     -f org-babel-tangle
   '';
   installPhase = ''
     rm output.org
