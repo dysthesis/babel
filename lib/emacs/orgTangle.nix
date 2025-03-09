@@ -3,8 +3,10 @@ pkgs.stdenv.mkDerivation {
   inherit name;
   buildInputs = [emacs];
   src = orgFile;
-  buildPhase = ''
+  unpackPhase = ''
     cp $src output.org
+  '';
+  buildPhase = ''
     emacs --batch -Q \
       --eval "(require 'org)" \
       --eval "(require 'ob-tangle)" \
