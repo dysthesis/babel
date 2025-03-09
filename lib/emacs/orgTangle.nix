@@ -11,7 +11,8 @@ pkgs.stdenv.mkDerivation {
       --eval "(org-babel-tangle \"output.org\")"
   '';
   installPhase = ''
+    rm output.org
     mkdir -p $out
-    cp *.el $out/
+    cp * $out/
   '';
 }
