@@ -1,4 +1,5 @@
-val: percent: let
+val: percent:
+let
   # Parse the decimal percentage (e.g., 0.8)
   decimal = builtins.fromJSON (toString percent);
 
@@ -9,9 +10,6 @@ val: percent: let
   intPart = builtins.floor result;
 
   # Round up if there's any fractional part
-  rounded =
-    if result > intPart
-    then intPart + 1
-    else intPart;
+  rounded = if result > intPart then intPart + 1 else intPart;
 in
-  rounded
+rounded

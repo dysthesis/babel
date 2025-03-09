@@ -12,6 +12,7 @@ nixpkgs.lib.extend (
       modules = import ./modules _final;
       pkgs = import ./pkgs;
       int = import ./int;
+      emacs = import ./emacs _final;
     };
   }
 )
