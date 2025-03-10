@@ -1,4 +1,5 @@
 lib: {
-  orgTangle = import ./orgTangle.nix;
-  orgTangleToString = import ./orgTangleToString.nix lib;
+  # Yoink github.com/talyz/fromElisp
+  fromElisp = import (import ./npins).fromElisp {};
+  parsePackagesFromUsePackage = import ./parsePackagesFromUsePackage lib;
 }
