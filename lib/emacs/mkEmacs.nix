@@ -1,101 +1,221 @@
-/*
-From: https://github.com/nix-community/emacs-overlay/blob/7236e0baef0a94fa7826f034ea96433224bcea89/elisp.nix
-Parse an emacs lisp configuration file to derive packages from
-use-package declarations.
-*/
-{pkgs}: let
-  inherit (lib.babel.emacs) parsePackagesFromUsePackage;
-  inherit (pkgs) lib;
+# From: https://github.com/emacs-twist/twist.nix/blob/b023e015963226157b6c8c09286e6067e5ca386d/pkgs/emacs/default.nix
+{
+  lib,
+  pkgs,
+  final ? pkgs,
+}:
+{
+  emacsPackage ? pkgs.emacs,
+  lockDir,
+  inventories ? null,
+  registries ?
+    if inventories == null then
+      builtins.abort "emacsTwist: registries is a required argument"
+    else
+      lib.warn "emacsTwist: inventories is deprecated. Use registries instead." inventories,
+  initFiles,
+  initParser ? lib.babel.emacs.parseUsePackages { },
+  initReader ? file: initParser (builtins.readFile file),
+  extraPackages ?
+    if builtins.compareVersions emacsPackage.version "29" > 0 then [ ] else [ "use-package" ],
+  # List of package names that are supposed to be reside in the same repository.
+  # These packages won't be declared in the generated flake.nix to not produce
+  # meaningless diffs in flake.lock.
+  localPackages ? [ ],
+  # Commands to run after running generateLockDir. The command is run at the
+  # root of the Git repository containing the lock directory. For example, if
+  # you have added the lock directory as a subflake, you can run `nix flake update
+  # <input name>` (since Nix 2.19) to update the flake input.
+  postCommandOnGeneratingLockDir ? null,
+  # User-provided list of Emacs built-in libraries as a string list
+  initialLibraries ? null,
+  addSystemPackages ? true,
+  inputOverrides ? { },
+  nativeCompileAheadDefault ? true,
+  wantExtraOutputs ? true,
+  extraOutputsToInstall ? if wantExtraOutputs then [ "info" ] else [ ],
+  # Whether to persist package metadata in the lock directory. This is needed to
+  # avoid IFD in certain situations.
+  persistMetadata ? false,
+  # Assume the main files of all packages contain only ASCII characters. This is
+  # a requirement for avoiding IFD, but some libraries actually contain
+  # non-ASCII characters, which cannot be parsed with `builtins.readFile`
+  # function of Nix.
+  defaultMainIsAscii ? false,
+  # Export a manifest file of of the package set from the wrapper
+  # (experimental). Needed if you use the hot-reloading feature of twist.el.
+  exportManifest ? false,
+  configurationRevision ? null,
+  extraSiteStartElisp ? "",
+}:
+let
+  inherit (lib.bael.emacs) buildPackages;
+  inherit (builtins)
+    readFile
+    attrNames
+    concatLists
+    isFunction
+    split
+    filter
+    isString
+    mapAttrs
+    isAttrs
+    elem
+    removeAttrs
+    ;
 in
-  {
-    config,
-    # bool to use the value of config or a derivation whose name is default.el
-    defaultInitFile ? false,
-    # emulate `use-package-always-ensure` behavior (defaulting to false)
-    alwaysEnsure ? false,
-    # emulate `#+PROPERTY: header-args:emacs-lisp :tangle yes`
-    alwaysTangle ? false,
-    extraEmacsPackages ? epkgs: [],
-    package ? pkgs.emacs,
-    override ? (self: super: {}),
-  }: let
-    isOrgModeFile = let
-      ext = lib.last (builtins.split "\\." (builtins.toString config));
-      type = builtins.typeOf config;
-    in
-      (type == "path" || lib.hasPrefix "/" config) && ext == "org";
+lib.makeScope pkgs.newScope (
+  self:
+  let
+    flakeLockFile = lockDir + "/flake.lock";
 
-    configText = let
-      type = builtins.typeOf config;
-    in
-      # configText can be sourced from either:
-      # - A string with context { config = "${hello}/config.el"; }
-      if type == "string" && builtins.hasContext config && lib.hasPrefix builtins.storeDir config
-      then builtins.readFile config
-      # - A config literal { config = "(use-package foo)"; }
-      else if type == "string"
-      then config
-      # - A config path { config = ./config.el; }
-      else if type == "path"
-      then builtins.readFile config
-      # - A derivation { config = pkgs.writeText "config.el" "(use-package foo)"; }
-      else if lib.isDerivation config
-      then builtins.readFile "${config}"
-      else throw "Unsupported type for config: \"${type}\"";
+    archiveLockFile = lockDir + "/archive.lock";
 
-    packages = parsePackagesFromUsePackage {
-      inherit configText isOrgModeFile alwaysTangle alwaysEnsure;
+    metadataJsonFile = lockDir + "/metadata.json";
+
+    userConfig =
+      self.initFiles
+      |> (map initReader)
+      |> lib.zipAttrs
+      |> (lib.mapAttrs (
+        name: values:
+        if name == "elispPackages" then
+          concatLists values
+        else if name == "elispPackagePins" then
+          lib.foldl' (acc: x: acc // x) { } values
+        else if name == "systemPackages" then
+          concatLists values
+        else
+          throw "${name} is an unknown attribute"
+      ));
+
+    explicitPackages = (userConfig.elispPackages or [ ]) ++ extraPackages;
+
+    builtinLibraryList = self.callPackage ./builtins.nix { };
+
+    builtinLibraries =
+      if initialLibraries != null then
+        initialLibraries
+      else
+        builtinLibraryList |> readFile |> (split "\n") |> (filter (s: isString s && s != ""));
+
+    enumerateConcretePackageSet = import ./data {
+      inherit (pkgs) linkFarm;
+      inherit
+        lib
+        flakeLockFile
+        archiveLockFile
+        metadataJsonFile
+        builtinLibraries
+        inputOverrides
+        defaultMainIsAscii
+        persistMetadata
+        ;
+      # Just remap the name
+      inventories = registries;
+      elispPackagePins = userConfig.elispPackagePins or { };
     };
-    emacsPackages = (pkgs.emacsPackagesFor package).overrideScope (
-      self: super:
-      # for backward compatibility: override was a function with one parameter
-        if builtins.isFunction (override super)
-        then override self super
-        else override super
-    );
-    emacsWithPackages = emacsPackages.emacsWithPackages;
-    mkPackageError = name: let
-      errorFun =
-        if (alwaysEnsure != null && alwaysEnsure)
-        then builtins.trace
-        else throw;
-    in
-      errorFun "Emacs package ${name}, declared wanted with use-package, not found." null;
-  in
-    emacsWithPackages (epkgs: let
-      usePkgs = map (name: epkgs.${name} or (mkPackageError name)) packages;
-      extraPkgs = extraEmacsPackages epkgs;
-      defaultInitFilePkg =
-        if !((builtins.isBool defaultInitFile) || (lib.isDerivation defaultInitFile))
-        then throw "defaultInitFile must be bool or derivation"
-        else if defaultInitFile == false
-        then null
-        else let
-          # name of the default init file must be default.el according to elisp manual
-          defaultInitFileName = "default.el";
-          configFile = pkgs.writeText defaultInitFileName configText;
-          orgModeConfigFile =
-            pkgs.runCommand defaultInitFileName {
-              nativeBuildInputs = [package];
-            } ''
-              cp ${configFile} config.org
-              emacs -Q --batch ./config.org -f org-babel-tangle
-              mv config.el $out
-            '';
+
+    packageInputs = enumerateConcretePackageSet "build" explicitPackages;
+
+    visibleBuiltinLibraries = lib.subtractLists explicitPackages builtinLibraries;
+
+    allDependencies = lib.fix (
+      self:
+      mapAttrs (
+        _ename:
+        { packageRequires, ... }:
+        let
+          explicitDeps = lib.subtractLists visibleBuiltinLibraries (
+            lib.packageRequiresToLibraryNames packageRequires
+          );
         in
-          epkgs.trivialBuild {
-            pname = "default";
-            src =
-              if defaultInitFile == true
-              then
-                if isOrgModeFile
-                then orgModeConfigFile
-                else configFile
-              else if defaultInitFile.name == defaultInitFileName
-              then defaultInitFile
-              else throw "name of defaultInitFile must be ${defaultInitFileName}";
-            version = "0.1.0";
-            packageRequires = usePkgs ++ extraPkgs;
-          };
-    in
-      usePkgs ++ extraPkgs ++ [defaultInitFilePkg])
+        lib.unique (explicitDeps ++ concatLists (lib.attrVals explicitDeps self))
+      ) packageInputs
+    );
+
+    excludeLocalPackages = attrs: removeAttrs attrs localPackages;
+  in
+  {
+    inherit lib;
+    emacs = emacsPackage;
+
+    # Exposed only for convenience.
+    inherit initFiles;
+
+    # Exposed for inspecting the configuration. Don't override this attribute
+    # using overrideScope'. It won't affect anything.
+    packageInputs = mapAttrs (
+      _: attrs:
+      lib.filterAttrs (_: v: !isFunction v) (
+        attrs
+        // lib.optionalAttrs (isAttrs attrs.src && attrs.src ? rev) {
+          sourceInfo = lib.filterAttrs (
+            name: _:
+            elem name [
+              "lastModified"
+              "lastModifiedDate"
+              "narHash"
+              "rev"
+              "shortRev"
+            ]
+          ) attrs.src;
+        }
+      )
+    ) packageInputs;
+
+    inherit builtinLibraryList;
+
+    maskedBuiltins = lib.intersectLists builtinLibraries (attrNames packageInputs);
+
+    # An actual derivation set of Emacs Lisp packages. You can override this
+    # attribute set to change how they are built.
+    elispPackages = lib.makeScope self.newScope (
+      eself:
+      mapAttrs (
+        ename: attrs:
+        buildPackages (
+          {
+            nativeCompileAhead = nativeCompileAheadDefault;
+            elispInputs = lib.attrVals allDependencies.${ename} eself;
+            inherit wantExtraOutputs pkgs;
+          }
+          // attrs
+        )
+      ) packageInputs
+    );
+
+    # nixpkgs used in elisp build overrides. It is not meant to be overridden by
+    # the user.
+    pkgs = final;
+
+    executablePackages =
+      if addSystemPackages then
+        map (pathStr: lib.getAttrFromPath (filter isString (split "\\." pathStr)) final) (
+          userConfig.systemPackages or [ ]
+        )
+      else
+        [ ];
+
+    icons = self.callPackage ./icons.nix { };
+
+    emacsWrapper = self.callPackage ./wrapper.nix {
+      packageNames = attrNames packageInputs;
+      inherit
+        extraOutputsToInstall
+        exportManifest
+        configurationRevision
+        extraSiteStartElisp
+        ;
+    };
+
+    # This makes the attrset a derivation for a shorthand.
+    inherit (self.emacsWrapper)
+      name
+      type
+      outputName
+      outPath
+      drvPath
+      ;
+  }
+)

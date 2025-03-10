@@ -24,82 +24,98 @@
 #     :hook (emacs-lisp-mode lisp-mode lisp-interaction-mode))
 # ''
 # => [ "direnv" "paredit" ]
-lib: {
+lib:
+{
   configText,
   alwaysEnsure ? false,
   isOrgModeFile ? false,
   alwaysTangle ? false,
-}: let
-  inherit
-    (lib.babel.emacs.fromElisp)
+}:
+let
+  inherit (lib.babel.emacs.fromElisp)
     fromOrgModeBabelElisp'
     fromElisp
     ;
   readFunction =
-    if isOrgModeFile
-    then
+    if isOrgModeFile then
       fromOrgModeBabelElisp' {
-        ":tangle" =
-          if alwaysTangle
-          then "yes"
-          else "no";
+        ":tangle" = if alwaysTangle then "yes" else "no";
       }
-    else fromElisp;
+    else
+      fromElisp;
 
-  find = item: list:
-    if list == []
-    then []
-    else if builtins.head list == item
-    then list
-    else find item (builtins.tail list);
+  find =
+    item: list:
+    if list == [ ] then
+      [ ]
+    else if builtins.head list == item then
+      list
+    else
+      find item (builtins.tail list);
 
-  getKeywordValue = keyword: list: let
-    keywordList = find keyword list;
-  in
-    if keywordList != []
-    then let
-      keywordValue = builtins.tail keywordList;
+  getKeywordValue =
+    keyword: list:
+    let
+      keywordList = find keyword list;
     in
-      if keywordValue != []
-      then builtins.head keywordValue
-      else true
-    else null;
+    if keywordList != [ ] then
+      let
+        keywordValue = builtins.tail keywordList;
+      in
+      if keywordValue != [ ] then builtins.head keywordValue else true
+    else
+      null;
 
-  isDisabled = item: let
-    disabledValue = getKeywordValue ":disabled" item;
-  in
-    if disabledValue == []
-    then false
-    else if builtins.isBool disabledValue
-    then disabledValue
-    else if builtins.isString disabledValue
-    then true
-    else false;
-
-  getName = item: let
-    ensureValue = getKeywordValue ":ensure" item;
-    usePackageName = builtins.head (builtins.tail item);
-  in
-    if builtins.isString ensureValue
-    then
-      if lib.hasPrefix ":" ensureValue
-      then usePackageName
-      else ensureValue
-    else if ensureValue == true || (ensureValue == null && alwaysEnsure)
-    then usePackageName
-    else [];
-
-  recurse = item:
-    if builtins.isList item && item != []
-    then let
-      packageManager = builtins.head item;
+  isDisabled =
+    item:
+    let
+      disabledValue = getKeywordValue ":disabled" item;
     in
-      if builtins.elem packageManager ["use-package" "leaf"]
+    if disabledValue == [ ] then
+      false
+    else if builtins.isBool disabledValue then
+      disabledValue
+    else if builtins.isString disabledValue then
+      true
+    else
+      false;
+
+  getName =
+    item:
+    let
+      ensureValue = getKeywordValue ":ensure" item;
+      usePackageName = builtins.head (builtins.tail item);
+    in
+    if builtins.isString ensureValue then
+      if lib.hasPrefix ":" ensureValue then usePackageName else ensureValue
+    else if ensureValue || (ensureValue == null && alwaysEnsure) then
+      usePackageName
+    else
+      [ ];
+
+  recurse =
+    item:
+    if builtins.isList item && item != [ ] then
+      let
+        packageManager = builtins.head item;
+      in
+      if
+        builtins.elem packageManager [
+          "use-package"
+          "leaf"
+        ]
       then
-        if !(isDisabled item)
-        then [packageManager (getName item)] ++ map recurse item
-        else []
-      else map recurse item
-    else [];
+        if !(isDisabled item) then
+          [
+            packageManager
+            (getName item)
+          ]
+          ++ map recurse item
+        else
+          [ ]
+      else
+        map recurse item
+    else
+      [ ];
 in
-  lib.flatten (map recurse (readFunction configText))
+lib.flatten (map recurse (readFunction configText))
