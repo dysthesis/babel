@@ -8,4 +8,4 @@ let
     filterAttrs
     ;
 in
-dir: _type: dir |> readDir |> filterAttrs (_name: value: value == type) |> attrNames
+dir: type: dir |> readDir |> filterAttrs (_name: value: value == type) |> attrNames
