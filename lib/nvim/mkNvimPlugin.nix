@@ -1,8 +1,9 @@
-pkgs: src: pname: revision:
+{
+  pkgs,
+  src,
+  pname,
+  version ? src.lastModifiedDate,
+}:
 pkgs.vimUtils.buildVimPlugin {
-  inherit pname src;
-  version =
-    if (src ? lastModifiedDate)
-    then src.lastModifiedDate
-    else revision;
+  inherit pname src version;
 }

@@ -22,7 +22,12 @@ lib: let
     );
 in
   pkgs: inputs: prefix:
-    map (x: mkNvimPlugin pkgs inputs."${prefix}${x}" x) (
+    map (x:
+      mkNvimPlugin {
+        inherit pkgs;
+        src = inputs."${prefix}${x}";
+        pname = x;
+      }) (
       attrNames (fromInputs {
         inherit inputs prefix;
       })
