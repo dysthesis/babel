@@ -22,5 +22,6 @@ in
     oledppuccin-tmux
     ropr
     ghostty-hardened
-    ;
+    askii
+  ;
 }

@@ -12,4 +12,5 @@ in
   ropr = callPackage ./ropr { };
   # Broken for darwin
   ghostty-hardened = callPackage ./ghostty-hardened { };
+  askii = callPackage ./askii { };
 }
