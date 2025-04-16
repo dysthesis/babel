@@ -12,4 +12,5 @@ in {
   # Broken for darwin
   ghostty-hardened = callPackage ./ghostty-hardened {};
   askii = callPackage ./askii {};
+  fzf-bibtex = callPackage ./fzf-bibtex {};
 }

@@ -6,5 +6,6 @@ pkgs.mkShell {
     alejandra
     statix
     deadnix
+    npins
   ];
 }

@@ -23,5 +23,6 @@ in {
     ghostty-hardened
     askii
     fast-fonts
+    fzf-bibtex
     ;
 }

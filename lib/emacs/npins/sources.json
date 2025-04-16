@@ -1,0 +1,17 @@
+{
+  "pins": {
+    "fromElisp": {
+      "type": "Git",
+      "repository": {
+        "type": "GitHub",
+        "owner": "talyz",
+        "repo": "fromElisp"
+      },
+      "branch": "master",
+      "revision": "f071a0e262c02c0895b575c4e322b7fd90713543",
+      "url": "https://github.com/talyz/fromElisp/archive/f071a0e262c02c0895b575c4e322b7fd90713543.tar.gz",
+      "hash": "06jmrg6zx9b3bv10damfkpg5sadlxzsbhzirrg0k5kms660ra5is"
+    }
+  },
+  "version": 3
+}
