@@ -1,6 +1,7 @@
 pkgs: _final: _prev: let
   inherit (pkgs) callPackage;
 in {
+  fast-fonts = callPackage ./fast-fonts {};
   sf-pro = callPackage ./sf-pro {};
   generate-domains-blocklist = callPackage ./generate-domains-blocklist {};
   georgia-fonts = callPackage ./georgia-fonts {};

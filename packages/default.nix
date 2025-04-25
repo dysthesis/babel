@@ -22,6 +22,7 @@ in {
     ropr
     ghostty-hardened
     askii
+    fast-fonts
     fzf-bibtex
     ;
 }
