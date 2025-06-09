@@ -9,17 +9,17 @@
   appName ? null,
   # The Neovim package to wrap
   neovim-unwrapped ? pkgs.neovim-unwrapped,
-  plugins ? [ ], # List of plugins
+  plugins ? [], # List of plugins
   # Regexes for config files to ignore, relative to the nvim directory.
   # e.g. [ "^plugin/neogit.lua" "^ftplugin/.*.lua" ]
-  ignoreConfigRegexes ? [ ],
-  extraPackages ? [ ], # Extra runtime dependencies (e.g. ripgrep, ...)
+  ignoreConfigRegexes ? [],
+  extraPackages ? [], # Extra runtime dependencies (e.g. ripgrep, ...)
   # The below arguments can typically be left as their defaults
   # Additional lua packages (not plugins), e.g. from luarocks.org.
   # e.g. p: [p.jsregexp]
-  extraLuaPackages ? _p: [ ],
+  extraLuaPackages ? _p: [],
   extraLuaConfig ? "",
-  extraPython3Packages ? _p: [ ], # Additional python 3 packages
+  extraPython3Packages ? _p: [], # Additional python 3 packages
   withPython3 ? true, # Build Neovim with Python 3 support?
   withRuby ? false, # Build Neovim with Ruby support?
   withNodeJs ? false, # Build Neovim with NodeJS support?
@@ -28,23 +28,25 @@
   # if the appName is something different than "nvim"
   viAlias ? appName == "nvim", # Add a "vi" binary to the build output as an alias?
   vimAlias ? appName == "nvim", # Add a "vim" binary to the build output as an alias?
-}:
-let
+}: let
   inherit (pkgs.neovimUtils) makeNeovimConfig;
 
-  inherit (builtins)
+  inherit
+    (builtins)
     length
     match
     readFile
     concatStringsSep
     ;
 
-  inherit (pkgs)
+  inherit
+    (pkgs)
     wrapNeovimUnstable
     stdenv
     ;
 
-  inherit (pkgs.lib)
+  inherit
+    (pkgs.lib)
     take
     splitString
     concatMapStringsSep
@@ -68,13 +70,20 @@ let
     # set to `true`, it is installed in the 'opt' packpath, and can be lazy loaded with
     # ':packadd! {plugin-name}
     optional = false;
-    runtime = { };
+    runtime = {};
   };
 
-  externalPackages = extraPackages ++ (optionals withSqlite [ pkgs.sqlite ]);
+  externalPackages = extraPackages ++ (optionals withSqlite [pkgs.sqlite]);
 
   # Map all plugins to an attrset { plugin = <plugin>; config = <config>; optional = <tf>; ... }
-  normalizedPlugins = map (x: defaultPlugin // (if x ? plugin then x else { plugin = x; })) plugins;
+  normalizedPlugins = map (x:
+    defaultPlugin
+    // (
+      if x ? plugin
+      then x
+      else {plugin = x;}
+    ))
+  plugins;
 
   # This nixpkgs util function creates an attrset
   # that pkgs.wrapNeovimUnstable uses to configure the Neovim build.
@@ -92,19 +101,16 @@ let
 
   # This uses the ignoreConfigRegexes list to filter
   # the nvim directory
-  nvimRtpSrc =
-    let
-      src = path;
-    in
+  nvimRtpSrc = let
+    src = path;
+  in
     cleanSourceWith {
       inherit src;
       name = "nvim-rtp-src";
-      filter =
-        path: _tyoe:
-        let
-          srcPrefix = toString src + "/";
-          relPath = removePrefix srcPrefix (toString path);
-        in
+      filter = path: _tyoe: let
+        srcPrefix = toString src + "/";
+        relPath = removePrefix srcPrefix (toString path);
+      in
         all (regex: match regex relPath == null) ignoreConfigRegexes;
     };
 
@@ -120,11 +126,13 @@ let
     buildPhase = ''
       mkdir -p $out/nvim
       mkdir -p $out/lua
+      mkdir -p $out/lsp
       rm init.lua
     '';
 
     installPhase = ''
       cp -r lua/* $out/lua
+      cp -r lsp/* $out/lsp
       rm -r lua
       # Copy nvim/after only if it exists
       if [ -d "after" ]; then
@@ -141,16 +149,14 @@ let
   # The final init.lua content that we pass to the Neovim wrapper.
   # It wraps the user init.lua, prepends the lua lib directory to the RTP
   # and prepends the nvim and after directory to the RTP
-  initLua =
-    let
-      init-lua =
-        "${path}/init.lua"
-        |> readFile
-        |> (s: splitString "\n" s)
-        |> (lines: take (length lines - trimLines) lines)
-        |> (lines: concatStringsSep "\n" lines);
-
-    in
+  initLua = let
+    init-lua =
+      "${path}/init.lua"
+      |> readFile
+      |> (s: splitString "\n" s)
+      |> (lines: take (length lines - trimLines) lines)
+      |> (lines: concatStringsSep "\n" lines);
+  in
     # lua
     ''
          vim.loader.enable()
@@ -181,7 +187,7 @@ let
       appName != "nvim" && appName != null && appName != ""
     ) ''--set NVIM_APPNAME "${appName}"'')
     # Add external packages to the PATH
-    ++ (optional (externalPackages != [ ]) ''--prefix PATH : "${makeBinPath externalPackages}"'')
+    ++ (optional (externalPackages != []) ''--prefix PATH : "${makeBinPath externalPackages}"'')
     # Set the LIBSQLITE_CLIB_PATH if sqlite is enabled
     ++ (optional withSqlite ''--set LIBSQLITE_CLIB_PATH "${pkgs.sqlite.out}/lib/libsqlite3.so"'')
     # Set the LIBSQLITE environment variable if sqlite is enabled
@@ -192,14 +198,14 @@ let
   resolvedExtraLuaPackages = extraLuaPackages luaPackages;
 
   # Native Lua libraries
-  extraMakeWrapperLuaCArgs = optionalString (resolvedExtraLuaPackages != [ ]) ''
+  extraMakeWrapperLuaCArgs = optionalString (resolvedExtraLuaPackages != []) ''
     --suffix LUA_CPATH
     ";"
     "${concatMapStringsSep ";" luaPackages.getLuaCPath resolvedExtraLuaPackages}"
   '';
 
   # Lua libraries
-  extraMakeWrapperLuaArgs = optionalString (resolvedExtraLuaPackages != [ ]) ''
+  extraMakeWrapperLuaArgs = optionalString (resolvedExtraLuaPackages != []) ''
     --suffix LUA_PATH
     ";"
     "${concatMapStringsSep ";" luaPackages.getLuaPath resolvedExtraLuaPackages}"
@@ -224,11 +230,11 @@ let
 
   isCustomAppName = appName != null && appName != "nvim";
 in
-neovim-wrapped.overrideAttrs (oa: {
-  buildPhase =
-    oa.buildPhase
-    # If a custom NVIM_APPNAME has been set, rename the `nvim` binary
-    + optionalString isCustomAppName ''
-      mv $out/bin/nvim $out/bin/${escapeShellArg appName}
-    '';
-})
+  neovim-wrapped.overrideAttrs (oa: {
+    buildPhase =
+      oa.buildPhase
+      # If a custom NVIM_APPNAME has been set, rename the `nvim` binary
+      + optionalString isCustomAppName ''
+        mv $out/bin/nvim $out/bin/${escapeShellArg appName}
+      '';
+  })
