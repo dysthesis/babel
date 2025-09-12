@@ -1,4 +1,5 @@
 {
+  lib,
   # Where to find the Neovim config directory
   path,
   pkgs,
@@ -197,36 +198,57 @@
   luaPackages = neovim-unwrapped.lua.pkgs;
   resolvedExtraLuaPackages = extraLuaPackages luaPackages;
 
-  # Native Lua libraries
-  extraMakeWrapperLuaCArgs = optionalString (resolvedExtraLuaPackages != []) ''
-    --suffix LUA_CPATH
-    ";"
-    "${concatMapStringsSep ";" luaPackages.getLuaCPath resolvedExtraLuaPackages}"
-  '';
+  # # Native Lua libraries
+  # extraMakeWrapperLuaCArgs = optionalString (resolvedExtraLuaPackages != []) ''
+  #   --suffix LUA_CPATH
+  #   ";"
+  #   "${concatMapStringsSep ";" luaPackages.getLuaCPath resolvedExtraLuaPackages}"
+  # '';
 
-  # Lua libraries
-  extraMakeWrapperLuaArgs = optionalString (resolvedExtraLuaPackages != []) ''
-    --suffix LUA_PATH
-    ";"
-    "${concatMapStringsSep ";" luaPackages.getLuaPath resolvedExtraLuaPackages}"
-  '';
+  # # Lua libraries
+  # extraMakeWrapperLuaArgs = optionalString (resolvedExtraLuaPackages != []) ''
+  #   --suffix LUA_PATH
+  #   ";"
+  #   "${concatMapStringsSep ";" luaPackages.getLuaPath resolvedExtraLuaPackages}"
+  # '';
 
   # wrapNeovimUnstable is the nixpkgs utility function for building a Neovim derivation.
-  neovim-wrapped = wrapNeovimUnstable neovim-unwrapped (
-    neovimConfig
-    // {
-      luaRcContent = initLua;
-      wrapperArgs =
-        escapeShellArgs neovimConfig.wrapperArgs
-        + " "
-        + extraMakeWrapperArgs
-        + " "
-        + extraMakeWrapperLuaCArgs
-        + " "
-        + extraMakeWrapperLuaArgs;
-      wrapRc = true;
-    }
-  );
+  neovim-wrapped = let
+    wrapperArgsList =
+      neovimConfig.wrapperArgs
+      ++ lib.optional (appName != null && appName != "" && appName != "nvim")
+      ["--set" "NVIM_APPNAME" appName]
+      ++ lib.optionals (externalPackages != [])
+      ["--prefix" "PATH" ":" (makeBinPath externalPackages)]
+      ++ lib.optionals withSqlite
+      [
+        "--set"
+        "LIBSQLITE_CLIB_PATH"
+        "${pkgs.sqlite.out}/lib/libsqlite3.so"
+        "--set"
+        "LIBSQLITE"
+        "${pkgs.sqlite.out}/lib/libsqlite3.so"
+      ]
+      ++ lib.optionals (resolvedExtraLuaPackages != [])
+      [
+        "--suffix"
+        "LUA_CPATH"
+        ";"
+        (lib.concatMapStringsSep ";" luaPackages.getLuaCPath resolvedExtraLuaPackages)
+        "--suffix"
+        "LUA_PATH"
+        ";"
+        (lib.concatMapStringsSep ";" luaPackages.getLuaPath resolvedExtraLuaPackages)
+      ];
+  in
+    wrapNeovimUnstable neovim-unwrapped (
+      neovimConfig
+      // {
+        luaRcContent = initLua;
+        wrapperArgs = lib.escapeShellArgs wrapperArgsList;
+        wrapRc = true;
+      }
+    );
 
   isCustomAppName = appName != null && appName != "nvim";
 in
