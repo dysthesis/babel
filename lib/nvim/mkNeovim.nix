@@ -1,5 +1,4 @@
-{
-  lib,
+lib: {
   # Where to find the Neovim config directory
   path,
   pkgs,
