@@ -24,5 +24,6 @@ in {
     askii
     fast-fonts
     fzf-bibtex
+    literata
     ;
 }

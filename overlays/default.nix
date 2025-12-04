@@ -13,4 +13,5 @@ in {
   ghostty-hardened = callPackage ./ghostty-hardened {};
   askii = callPackage ./askii {};
   fzf-bibtex = callPackage ./fzf-bibtex {};
+  literata = callPackage ./literata {};
 }
