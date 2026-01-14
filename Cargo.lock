@@ -80,6 +80,7 @@ dependencies = [
  "clap",
  "color-eyre",
  "criterion",
+ "percent-encoding",
  "proptest",
  "proptest-derive",
  "serenity",
