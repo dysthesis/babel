@@ -1,0 +1,18 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc d89e1fec673b6ea8960ad70f24e90a198301d071cf890c3efea3e9c9e387a3f0 # shrinks to (input, expected_canonical) = ("0000000000", "0000000000")
+cc 3aa388bfe752eb30a707d7fbccfb17d3ee67f0f993a3df9323614d8e7ff0eecb # shrinks to (input, expected) = ("0/a", "0/a")
+cc 454abcbacad545826862343cff1f93b2542058811aad09a2c8088db2602ea25f # shrinks to input = "!¡"
+cc 537a1d9dc747211fb56e54af8b6b7425dfb8db7f5d57a95d1039cce87c449e1e # shrinks to input = "0277211431"
+cc d101d158eabc99c36d729681dc54ee0790cd1f1b19bbab14796f60469f0bc0a5 # shrinks to (input, expected) = ("¡/.", "¡/.")
+cc de1549416907115de1153220ed85558b7fa96649e38932be8879454139806c11 # shrinks to (input, expected) = ("¡/.", "¡/.")
+cc 3482994f25fd862405b10aa09d9c86e2d6ffe2ae9444d5dc1ddae5930d0b5744 # shrinks to input = "¡/."
+cc 02ea750b9b4933dafeac7b2173873677331440308e172f1049167ce623dd53c0 # shrinks to (input, expected) = ("%5E/\u{103ae5}%Ⱥ}`", "%5E/\u{103ae5}%Ⱥ}`")
+cc baea0cda5be1577eca82801efacf247eb50fb1b5d6b0f0b9fe9b16ba9a566cbd # shrinks to (input, expected) = ("¡/%20", "¡/%20")
+cc 45fe1073101995cec0348dbe9aed072a002e365d3ba8b0e7c9d5104f66ccb775 # shrinks to (input, expected) = ("doi:𑇡/0", "𑇡/0")
+cc 8cc7b491db74aac346d39b634bf29df9b480c1ee863ce94e56b02c57962f29a9 # shrinks to (input, expected) = ("doi:yaHa/H", "yaHa/H")
+cc fb6175955bc62d45dc0f9d30a799e8ae18fe92d3b5afc05610a7eb8ee6ffd6c7 # shrinks to input = "\u{1da9f}౩[#/"
