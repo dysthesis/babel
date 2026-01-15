@@ -16,3 +16,7 @@ cc baea0cda5be1577eca82801efacf247eb50fb1b5d6b0f0b9fe9b16ba9a566cbd # shrinks to
 cc 45fe1073101995cec0348dbe9aed072a002e365d3ba8b0e7c9d5104f66ccb775 # shrinks to (input, expected) = ("doi:𑇡/0", "𑇡/0")
 cc 8cc7b491db74aac346d39b634bf29df9b480c1ee863ce94e56b02c57962f29a9 # shrinks to (input, expected) = ("doi:yaHa/H", "yaHa/H")
 cc fb6175955bc62d45dc0f9d30a799e8ae18fe92d3b5afc05610a7eb8ee6ffd6c7 # shrinks to input = "\u{1da9f}౩[#/"
+cc 14f712bba694d6df39a88fdaee6946655a46b72b811e645b3985215d0c916421 # shrinks to (input, expected) = ("𑻠/.", "𑻠/.")
+cc 5652fbf24df9e4a5a25bc12031dea0b89bb155d6f29608af41bd03e36b07cbc5 # shrinks to (input, expected) = ("🟠/.", "🟠/.")
+cc 525eb9e32e883c6cc483d2c993bbfc18de67de3d14fadd184dab426154f396d4 # shrinks to (input, expected) = ("0/!.", "0/!.")
+cc a7d105af11dc857fc5c116d0aa30102b6a042c00ece7c8fec5b460e60ddd9317 # shrinks to (input, expected) = ("!/!.", "!/!.")

@@ -1,3 +1,4 @@
+#![feature(const_option_ops)]
 mod bot;
 mod providers;
-mod query;
+pub mod query;

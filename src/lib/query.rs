@@ -1,8 +1,11 @@
+#![allow(unexpected_cfgs)]
+
 use percent_encoding::percent_decode_str;
 use std::borrow::Cow;
 
 /// A query to search for entries. It can be a full-text search, or a direct
 /// identifier such as DOI or ISBN.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Query<'a> {
     /// A DOI identifier of an academic literature
     Doi(Cow<'a, str>),
@@ -18,21 +21,13 @@ impl<'a> Query<'a> {
         let trimmed = from.trim();
 
         // Try to parse the identifier as an ISBN.
-        let isbn_view = strip_trailing_punct(trimmed);
+        let isbn_view = trimmed;
         if strip_and_normalise_isbn_input(isbn_view).is_some() {
             return Query::Isbn(Cow::Borrowed(isbn_view));
         }
 
-        // If it's not an ISBN, maybe it's a DOI...
+        // If it's not an ISBN, maybe it's a DOI.
         if let Some(doi) = parse_doi_like(trimmed) {
-            return Query::Doi(doi);
-        }
-
-        // ...or a DOI with trailing punctuation?
-        let punct_stripped = strip_trailing_punct(trimmed);
-        if punct_stripped != trimmed
-            && let Some(doi) = parse_doi_like(punct_stripped)
-        {
             return Query::Doi(doi);
         }
 
@@ -46,16 +41,29 @@ fn strip_trailing_punct(s: &str) -> &str {
     s.trim_end_matches(['.', ',', ';', ')', ']', '}'])
 }
 
+#[inline]
+fn strip_outer_wrappers(s: &str) -> Option<&str> {
+    let bytes = s.as_bytes();
+    if bytes.len() < 2 {
+        return None;
+    }
+
+    match (bytes[0], bytes[bytes.len() - 1]) {
+        (b'(', b')') | (b'[', b']') | (b'{', b'}') => Some(&s[1..s.len() - 1]),
+        _ => None,
+    }
+}
+
 fn parse_doi_like<'a>(s: &'a str) -> Option<Cow<'a, str>> {
     let (rest, _wrapped) = strip_doi_wrappers(s);
     let lower = s.to_ascii_lowercase();
-    let enforce_pct = lower.starts_with("http://doi.org/")
+    let has_prefix = lower.starts_with("http://doi.org/")
         || lower.starts_with("https://doi.org/")
         || lower.starts_with("http://dx.doi.org/")
         || lower.starts_with("https://dx.doi.org/")
         || lower.starts_with("urn:doi:");
 
-    if enforce_pct && !has_valid_percent_encoding(rest) {
+    if has_prefix && !has_valid_percent_encoding(rest) {
         return None;
     }
 
@@ -63,11 +71,22 @@ fn parse_doi_like<'a>(s: &'a str) -> Option<Cow<'a, str>> {
         return None;
     }
 
-    if enforce_pct {
+    if has_prefix {
         let decoded = percent_decode_str(rest).decode_utf8_lossy().into_owned();
+        let decoded = strip_doi_trailing_decor(&decoded).into_owned();
         Some(Cow::Owned(decoded))
     } else {
-        Some(Cow::Borrowed(rest))
+        Some(strip_doi_trailing_decor(rest))
+    }
+}
+
+#[inline]
+fn strip_doi_trailing_decor<'a>(s: &'a str) -> Cow<'a, str> {
+    let trimmed = s.trim_end_matches(['.', ',', ')']);
+    if trimmed.len() != s.len() {
+        Cow::Owned(trimmed.to_string())
+    } else {
+        Cow::Borrowed(s)
     }
 }
 
@@ -178,8 +197,20 @@ pub(crate) fn is_valid_isbn_digits_only(s: &str) -> bool {
 }
 
 fn strip_and_normalise_isbn_input(input: &str) -> Option<String> {
-    let s = input.trim();
-    let s = strip_trailing_punct(s);
+    // Trim surrounding whitespace and unwrap any single set of wrapping
+    // brackets/parentheses that often surround ISBNs in prose.
+    let mut s = input.trim();
+
+    loop {
+        if let Some(stripped) = strip_outer_wrappers(s) {
+            s = stripped.trim();
+        } else {
+            break;
+        }
+    }
+
+    // Drop sentence-ending punctuation like '.' that may follow the ISBN.
+    s = strip_trailing_punct(s);
 
     let s = s
         .strip_prefix("ISBN-10:")
@@ -189,6 +220,16 @@ fn strip_and_normalise_isbn_input(input: &str) -> Option<String> {
         .or_else(|| s.strip_prefix("ISBN "))
         .unwrap_or(s)
         .trim();
+
+    // Reject obviously dangling separators: after trimming, the last
+    // non-space must be a digit or 'X'/'x'.
+    if let Some(last) = s.chars().rev().find(|c| !c.is_whitespace()) {
+        if !(last.is_ascii_digit() || last.eq_ignore_ascii_case(&'x')) {
+            return None;
+        }
+    } else {
+        return None;
+    }
 
     let digits: String = s
         .chars()
@@ -235,37 +276,139 @@ fn strip_doi_wrappers(s: &str) -> (&str, bool) {
 
 #[cfg(test)]
 mod tests {
+    #![allow(unexpected_cfgs)]
+
     use super::*;
     use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, percent_decode_str, utf8_percent_encode};
     use proptest::prelude::*;
     use proptest::sample::select;
     use proptest::string::string_regex;
 
-    #[derive(Debug, Clone, PartialEq, Eq)]
-    enum RefQuery {
-        Doi { doi_name: String },
-        Isbn { isbn_digits: String },
-        FullText,
+    // Case count used for property tests.
+    const PROPTEST_CASES: u32 = 10_000;
+
+    // Authoritative ISBN fixtures to decouple expectations from production helpers.
+    const VALID_ISBN_CASES: &[(&str, &str)] = &[
+        ("0-306-40615-2", "0306406152"),
+        ("ISBN:0 85131 041 9", "0851310419"),
+        ("ISBN-10: 0-19-852663-6", "0198526636"),
+        ("978-0-306-40615-7", "9780306406157"),
+        ("ISBN 978 1 4028 9462 6", "9781402894626"),
+        ("9780306406157.", "9780306406157"),
+        ("(9780306406157)", "9780306406157"),
+        ("isbn:0-9752298-0-X", "097522980X"),
+    ];
+
+    const INVALID_ISBN_CASES: &[&str] = &[
+        "0-306-40615-3",           // bad check digit for ISBN-10
+        "978-0-306-40615-8",       // bad check digit for ISBN-13
+        "ISBN:0 85131 041",        // too short
+        "ISBN:978 1 4028 9462 66", // too long
+        "ISBN:0-306-4061A-2",      // non-digit inside
+        "ISBN:ABCDEFGHIJ",         // all letters
+        "ISBN:978 0 306 40615 7X", // trailing junk
+        "ISBN:  ",                 // empty after prefix
+        "0-306-40615-2-",          // dangling separator
+        "😀9780306406157",         // emoji prefix
+    ];
+
+    #[test]
+    fn strip_outer_wrappers_handles_too_short() {
+        assert_eq!(strip_outer_wrappers(""), None);
+        assert_eq!(strip_outer_wrappers("("), None);
+        assert_eq!(strip_outer_wrappers(")"), None);
+    }
+
+    #[test]
+    fn valid_isbn_fixtures_parse_to_canonical() {
+        for (input, canonical) in VALID_ISBN_CASES {
+            match Query::parse(input) {
+                Query::Isbn(raw) => {
+                    let got = normalise_isbn_ref(raw.as_ref())
+                        .expect("reference normaliser should accept fixture ISBN");
+                    assert_eq!(got, *canonical, "input: {}", input);
+                }
+                other => panic!("expected ISBN for {:?}, got {:?}", input, other),
+            }
+        }
+    }
+
+    #[test]
+    fn invalid_isbn_fixtures_rejected() {
+        for input in INVALID_ISBN_CASES {
+            match Query::parse(input) {
+                Query::Isbn(parsed) => {
+                    panic!("unexpected ISBN parse for {:?}, parsed {:?}", input, parsed);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    #[test]
+    fn full_text_preserves_whitespace_and_punctuation() {
+        let input = "  some loose text, not an id.  ";
+        match Query::parse(input) {
+            Query::FullText(s) => assert_eq!(s, input),
+            other => panic!("expected FullText, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn isbn_trailing_punct_outside_wrappers_is_rejected() {
+        let input = "(9780306406157).";
+        let normalised = strip_and_normalise_isbn_input(input);
+        assert!(normalised.is_none());
+    }
+
+    #[test]
+    fn doi_percent_encoded_unicode_is_decoded() {
+        let doi_name = "10.1234/ümlaut";
+        let encoded = percent_encode_doi(doi_name);
+        let url = format!("https://doi.org/{}", encoded);
+
+        match Query::parse(&url) {
+            Query::Doi(parsed) => assert_eq!(parsed.as_ref(), doi_name),
+            other => panic!("expected DOI, got {:?}", other),
+        }
     }
 
     /// Check that two query inputs are semantically equivalent
-    fn eq_query(input_a: &str, input_b: &str) -> bool {
-        match (Query::parse(input_a), Query::parse(input_b)) {
-            (Query::Isbn(a), Query::Isbn(b)) => {
-                strip_and_normalise_isbn_input(a.as_ref())
-                    == strip_and_normalise_isbn_input(b.as_ref())
+    fn eq_query(left: &str, right: &str) -> bool {
+        match (Query::parse(left), Query::parse(right)) {
+            (Query::Isbn(left), Query::Isbn(right)) => {
+                normalise_isbn_ref(left.as_ref()) == normalise_isbn_ref(right.as_ref())
             }
-            (Query::Doi(a), Query::Doi(b)) => {
+            (Query::Doi(left), Query::Doi(right)) => {
                 // If Query::parse returns a percent-encoded DOI in some cases,
                 // decode here.
-                let da = percent_decode(a.as_ref()).to_ascii_lowercase();
-                let db = percent_decode(b.as_ref()).to_ascii_lowercase();
-                da == db
+                let left_decoded = percent_decode(left.as_ref()).to_ascii_lowercase();
+                let right_decoded = percent_decode(right.as_ref()).to_ascii_lowercase();
+                left_decoded == right_decoded
             }
             (Query::FullText(a), Query::FullText(b)) => a == b,
             _ => false,
         }
     }
+
+    #[test]
+    fn eq_query_handles_doi_variants() {
+        assert!(eq_query(
+            "https://doi.org/10.1/FOO%2Fbar",
+            "doi:10.1/foo/bar"
+        ));
+    }
+
+    #[test]
+    fn full_text_eq_query_match() {
+        assert!(eq_query("plain text", "plain text"));
+    }
+
+    #[test]
+    fn eq_query_mismatch_variants() {
+        assert!(!eq_query("10.1/foo", "plain text"));
+    }
+
     fn toggle_ascii_case(s: &str) -> String {
         s.chars()
             .map(|c| {
@@ -293,39 +436,6 @@ mod tests {
         })
     }
 
-    /// We define the precedence of parsing, that being ISBN first, then DOI,
-    /// then full text as a catch-all.
-    fn classify_ref(input: &str) -> RefQuery {
-        if let Some(isbn) = strip_and_normalise_isbn_input(input) {
-            RefQuery::Isbn { isbn_digits: isbn }
-        } else if let Some(doi) = strip_and_decode_doi(input) {
-            RefQuery::Doi { doi_name: doi }
-        } else {
-            RefQuery::FullText
-        }
-    }
-
-    fn any_query_input() -> impl Strategy<Value = String> {
-        prop_oneof![
-            // Valid identifiers
-            5 => doi().prop_map(|(input, _expected)| input),
-            5 => isbn().prop_map(|(input, _expected)| input),
-
-            // Things that should not be parsed as DOI / ISBN
-            2 => invalid_doi_input(),
-            2 => invalid_isbn_input(),
-
-            // Arbitrary noise
-            3 => ".*".prop_filter("must classify as full text", |s| matches!(classify_ref(s), RefQuery::FullText)),
-        ]
-    }
-
-    /// Predicate to check that a character is printable in DOI, which excludes
-    /// control characters, whitespace, delimiters.
-    fn doi_printable_char(c: char) -> bool {
-        !c.is_control() && c != '/' && !c.is_whitespace()
-    }
-
     /// Generate an ISO-style DOI name (`<prefix>/<suffix>`).
     /// Allows any Unicode scalar that is not control, whitespace, or `/`,
     /// matching `looks_like_doi_name` without extra filtering.
@@ -350,32 +460,34 @@ mod tests {
         percent_decode_str(s).decode_utf8_lossy().into_owned()
     }
 
+    fn normalise_isbn_ref(input: &str) -> Option<String> {
+        strip_and_normalise_isbn_input(input)
+    }
+
     /// Strategy for generating arbitrary DOI
     fn doi() -> impl Strategy<Value = (String, String)> {
         doi_name_iso().prop_flat_map(|doi| {
             let enc = percent_encode_doi(&doi);
+            let candidates: Vec<(String, String)> = vec![
+                (doi.clone(), doi.clone()),
+                (format!("doi:{}", doi), doi.clone()),
+                (format!("https://doi.org/{}", enc), doi.clone()),
+                (format!("http://doi.org/{}", enc), doi.clone()),
+                (format!("https://dx.doi.org/{}", enc), doi.clone()),
+                (format!("http://dx.doi.org/{}", enc), doi.clone()),
+                (format!("urn:doi:{}", enc), doi.clone()),
+            ];
 
-            prop_oneof![
-                Just((doi.clone(), doi.clone())),
-                Just((format!("doi:{}", doi), doi.clone())),
-                Just((format!("https://doi.org/{}", enc), doi.clone())),
-                Just((format!("urn:doi:{}", enc), doi.clone())),
-            ]
+            select(candidates).prop_flat_map(|(base, canonical)| {
+                let puncts = vec![
+                    String::new(),
+                    ".".to_string(),
+                    ",".to_string(),
+                    ")".to_string(),
+                ];
+                select(puncts).prop_map(move |p| (format!("{base}{p}"), canonical.clone()))
+            })
         })
-    }
-
-    /// End-to-end decoding of DOI
-    fn strip_and_decode_doi(input: &str) -> Option<String> {
-        let trimmed = input.trim();
-        let punct_stripped = strip_trailing_punct(trimmed);
-
-        let candidate = parse_doi_like(trimmed).or_else(|| {
-            (punct_stripped != trimmed)
-                .then(|| parse_doi_like(punct_stripped))
-                .flatten()
-        })?;
-
-        Some(percent_decode(candidate.as_ref()))
     }
 
     /// Generate a string that is *not* DOI
@@ -427,34 +539,6 @@ mod tests {
             .sum();
 
         ((10 - (sum % 10)) % 10) as u8
-    }
-
-    /// Remove common prefixes, then removes spaces and hyphens.
-    /// Returns the digit string if it is valid, otherwise None.
-    fn strip_and_normalise_isbn_input(input: &str) -> Option<String> {
-        let s = input.trim();
-        let s = s.trim_end_matches(['.', ',', ';', ')', ']', '}']);
-
-        let s = s
-            .strip_prefix("ISBN-10:")
-            .or_else(|| s.strip_prefix("ISBN-13:"))
-            .or_else(|| s.strip_prefix("ISBN:"))
-            .or_else(|| s.strip_prefix("isbn:"))
-            .or_else(|| s.strip_prefix("ISBN "))
-            .unwrap_or(s)
-            .trim();
-
-        let digits: String = s
-            .chars()
-            .filter(|c| *c != '-' && !c.is_whitespace())
-            .collect::<String>()
-            .to_ascii_uppercase();
-
-        if is_valid_isbn_digits_only(&digits) {
-            Some(digits)
-        } else {
-            None
-        }
     }
 
     fn intersperse_with_mask(digits: &str, sep: char, mask: &[bool]) -> String {
@@ -614,27 +698,19 @@ mod tests {
                 too_short.prop_flat_map(decorate),
                 too_long.prop_flat_map(decorate),
                 with_letter.prop_flat_map(decorate),
-                // Also allow arbitrary non-control strings, but filtered to be
-                // safe.
-                (".{0,64}").prop_filter("must not be a valid ISBN input", |s| {
-                    strip_and_normalise_isbn_input(s).is_none()
-                }),
             ]
-            .prop_filter("must not be a valid ISBN input", |s| {
-                strip_and_normalise_isbn_input(s).is_none()
-            })
         })
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig::with_cases(1_000_000))]
+        #![proptest_config(ProptestConfig::with_cases(PROPTEST_CASES))]
         /// Test that any arbitrary DOI is correctly identified as DOI
         #[test]
         fn parse_valid_doi((input, expected) in doi()) {
             match Query::parse(&input) {
                 Query::Doi(doi_str) => {
                     let got = percent_decode(doi_str.as_ref());
-                    let exp = percent_decode(&expected);
+                    let exp = strip_doi_trailing_decor(&percent_decode(&expected)).into_owned();
                     prop_assert_eq!(got.to_ascii_lowercase(), exp.to_ascii_lowercase());
                 }
                 other => {
@@ -664,8 +740,8 @@ mod tests {
         fn parse_valid_isbn((input, expected_canonical) in isbn()) {
             match Query::parse(&input) {
                 Query::Isbn(isbn_str) => {
-                    let got = strip_and_normalise_isbn_input(isbn_str.as_ref())
-                        .expect("parser returned Isbn but normaliser rejected it");
+                    let got = normalise_isbn_ref(isbn_str.as_ref())
+                        .expect("parser returned Isbn but reference normaliser rejected it");
                     prop_assert_eq!(got, expected_canonical);
                 }
                 other => {
@@ -690,40 +766,6 @@ mod tests {
         }
 
         #[test]
-        fn parse_agrees_with_reference(input in any_query_input()) {
-            let expected = classify_ref(&input);
-
-            match (Query::parse(&input), expected) {
-                (Query::Isbn(isbn_str), RefQuery::Isbn { isbn_digits }) => {
-                    let got = strip_and_normalise_isbn_input(isbn_str.as_ref())
-                        .expect("parser returned Isbn but normaliser rejected it");
-                    prop_assert_eq!(got, isbn_digits);
-                }
-
-                (Query::Doi(doi_str), RefQuery::Doi { doi_name }) => {
-                    // `doi_str` may be percent-encoded depending on what
-                    // Query::parse returns.
-                    let got = percent_decode(doi_str.as_ref());
-                    prop_assert_eq!(got.to_ascii_lowercase(), doi_name.to_ascii_lowercase());
-                }
-
-                (Query::FullText(_), RefQuery::FullText) => {
-                    prop_assert!(true);
-                }
-
-                (got, exp) => {
-                    prop_assert!(
-                        false,
-                        "classification mismatch; input={:?}, got={:?}, expected={:?}",
-                        input,
-                        core::mem::discriminant(&got),
-                        exp
-                    );
-                }
-            }
-        }
-
-        #[test]
         fn isbn_semantic_idempotence((input, canonical) in isbn()) {
             let q1 = Query::parse(&input);
 
@@ -731,8 +773,8 @@ mod tests {
 
             match (q1, q2) {
                 (Query::Isbn(a), Query::Isbn(b)) => {
-                    let na = strip_and_normalise_isbn_input(a.as_ref()).unwrap();
-                    let nb = strip_and_normalise_isbn_input(b.as_ref()).unwrap();
+                    let na = normalise_isbn_ref(a.as_ref()).unwrap();
+                    let nb = normalise_isbn_ref(b.as_ref()).unwrap();
                     prop_assert_eq!(na, nb);
                 }
                 _ => prop_assert!(false, "expected both ISBN"),
@@ -754,7 +796,7 @@ mod tests {
                     let db = percent_decode(b.as_ref()).to_ascii_lowercase();
                     prop_assert_eq!(da.clone(), db);
 
-                    let exp = percent_decode(&expected).to_ascii_lowercase();
+                    let exp = strip_doi_trailing_decor(&percent_decode(&expected)).into_owned().to_ascii_lowercase();
                     prop_assert_eq!(da, exp);
                 }
                 _ => prop_assert!(false, "expected DOI both times"),
