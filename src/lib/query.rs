@@ -63,88 +63,151 @@ fn parse_doi_like<'a>(s: &'a str) -> Option<Cow<'a, str>> {
     let (rest, prefix) = strip_doi_wrappers(s);
     let validate_percent = matches!(prefix, DoiPrefixKind::HttpLike | DoiPrefixKind::Urn);
 
-    process_doi(rest, validate_percent).map(strip_doi_trailing_decor_cow)
+    DoiStream::new(rest, validate_percent)
+        .process()
+        .map(strip_doi_trailing_decor_cow)
 }
 
-#[inline]
-fn process_doi<'a>(s: &'a str, validate_percent: bool) -> Option<Cow<'a, str>> {
-    let bytes = s.as_bytes();
-    let mut first_slash: Option<usize> = None;
-    let mut out: Option<Vec<u8>> = None;
-    let mut i = 0;
+/// Parser for DOI
+#[derive(Debug)]
+struct DoiStream<'a> {
+    source: &'a str,
+    validate_percent: bool,
+    first_slash: Option<usize>,
+    out: Option<Vec<u8>>,
+    skip: u8,
+}
 
-    while i < bytes.len() {
-        let b = bytes[i];
-        match b {
-            b'/' => {
-                if first_slash.is_none() {
-                    first_slash = Some(i);
-                }
-                if let Some(ref mut o) = out {
-                    o.push(b'/');
-                }
-                i += 1;
-            }
-            b'%' if validate_percent => {
-                if i + 2 >= bytes.len()
-                    || !bytes[i + 1].is_ascii_hexdigit()
-                    || !bytes[i + 2].is_ascii_hexdigit()
-                {
-                    return None;
-                }
-
-                let decode_hex = |h: u8| -> u8 {
-                    match h {
-                        b'0'..=b'9' => h - b'0',
-                        b'a'..=b'f' => 10 + (h - b'a'),
-                        b'A'..=b'F' => 10 + (h - b'A'),
-                        _ => unreachable!(),
-                    }
-                };
-
-                let v = (decode_hex(bytes[i + 1]) << 4) | decode_hex(bytes[i + 2]);
-
-                let o = out.get_or_insert_with(|| {
-                    let mut v = Vec::with_capacity(bytes.len());
-                    v.extend_from_slice(&bytes[..i]);
-                    v
-                });
-                o.push(v);
-                i += 3;
-            }
-            _ if b.is_ascii_control() || b.is_ascii_whitespace() => return None,
-            _ if b < 0x80 => {
-                if let Some(ref mut o) = out {
-                    o.push(b);
-                }
-                i += 1;
-            }
-            _ => {
-                if validate_percent {
-                    return None;
-                }
-                let ch = s[i..].chars().next().unwrap();
-                if ch.is_control() || ch.is_whitespace() {
-                    return None;
-                }
-                if let Some(ref mut o) = out {
-                    let mut buf = [0u8; 4];
-                    let n = ch.encode_utf8(&mut buf).len();
-                    o.extend_from_slice(&buf[..n]);
-                }
-                i += ch.len_utf8();
-            }
+impl<'a> DoiStream<'a> {
+    #[inline]
+    fn new(source: &'a str, validate_percent: bool) -> Self {
+        Self {
+            source,
+            validate_percent,
+            first_slash: None,
+            out: None,
+            skip: 0,
         }
     }
 
-    let slash = first_slash?;
-    if slash == 0 || slash == bytes.len() - 1 {
-        return None;
+    #[inline]
+    fn process(mut self) -> Option<Cow<'a, str>> {
+        self.source
+            .as_bytes()
+            .iter()
+            .copied()
+            .enumerate()
+            .try_for_each(|(idx, byte)| self.consume(idx, byte))
+            .ok()?;
+
+        self.finish()
     }
 
-    match out {
-        None => Some(Cow::Borrowed(s)),
-        Some(v) => String::from_utf8(v).ok().map(Cow::Owned),
+    #[inline]
+    fn consume(&mut self, idx: usize, byte: u8) -> Result<(), ()> {
+        if self.skip > 0 {
+            self.skip -= 1;
+            return Ok(());
+        }
+
+        match byte {
+            b'/' => self.record_slash(idx),
+            b'%' if self.validate_percent => self.record_percent(idx),
+            _ => self.record_other(idx, byte),
+        }
+    }
+
+    #[inline]
+    fn record_slash(&mut self, idx: usize) -> Result<(), ()> {
+        if self.first_slash.is_none() {
+            self.first_slash = Some(idx);
+        }
+        if let Some(ref mut out) = self.out {
+            out.push(b'/');
+        }
+        Ok(())
+    }
+
+    #[inline]
+    fn record_other(&mut self, idx: usize, byte: u8) -> Result<(), ()> {
+        if byte.is_ascii_control() || byte.is_ascii_whitespace() {
+            return Err(());
+        }
+        if byte < 0x80 {
+            if let Some(ref mut out) = self.out {
+                out.push(byte);
+            }
+            return Ok(());
+        }
+        self.record_unicode(idx)
+    }
+
+    #[inline]
+    fn record_percent(&mut self, idx: usize) -> Result<(), ()> {
+        let bytes = self.source.as_bytes();
+        let hi = *bytes.get(idx + 1).ok_or(())?;
+        let lo = *bytes.get(idx + 2).ok_or(())?;
+
+        if !(hi.is_ascii_hexdigit() && lo.is_ascii_hexdigit()) {
+            return Err(());
+        }
+
+        let decoded = (decode_hex(hi) << 4) | decode_hex(lo);
+        let out = self.ensure_out(idx);
+        out.push(decoded);
+        self.skip = 2; // skip over the two hex digits already consumed
+        Ok(())
+    }
+
+    #[inline]
+    fn record_unicode(&mut self, idx: usize) -> Result<(), ()> {
+        if self.validate_percent {
+            return Err(());
+        }
+
+        let ch = self.source[idx..].chars().next().ok_or(())?;
+        if ch.is_control() || ch.is_whitespace() {
+            return Err(());
+        }
+
+        let out = self.ensure_out(idx);
+        let mut buf = [0u8; 4];
+        let n = ch.encode_utf8(&mut buf).len();
+        out.extend_from_slice(&buf[..n]);
+        self.skip = ch.len_utf8().saturating_sub(1) as u8;
+        Ok(())
+    }
+
+    #[inline]
+    fn ensure_out(&mut self, upto: usize) -> &mut Vec<u8> {
+        self.out.get_or_insert_with(|| {
+            let mut v = Vec::with_capacity(self.source.len());
+            v.extend_from_slice(&self.source.as_bytes()[..upto]);
+            v
+        })
+    }
+
+    #[inline]
+    fn finish(self) -> Option<Cow<'a, str>> {
+        let slash = self.first_slash?;
+        if slash == 0 || slash == self.source.len() - 1 {
+            return None;
+        }
+
+        match self.out {
+            None => Some(Cow::Borrowed(self.source)),
+            Some(bytes) => String::from_utf8(bytes).ok().map(Cow::Owned),
+        }
+    }
+}
+
+#[inline]
+fn decode_hex(h: u8) -> u8 {
+    match h {
+        b'0'..=b'9' => h - b'0',
+        b'a'..=b'f' => 10 + (h - b'a'),
+        b'A'..=b'F' => 10 + (h - b'A'),
+        _ => unreachable!(),
     }
 }
 
@@ -177,6 +240,7 @@ fn strip_doi_trailing_decor_cow<'a>(s: Cow<'a, str>) -> Cow<'a, str> {
     }
 }
 
+#[inline]
 fn strip_prefix_ignore_ascii_case<'a>(s: &'a str, prefix: &str) -> Option<&'a str> {
     let s_bytes = s.as_bytes();
     let prefix_bytes = prefix.as_bytes();
@@ -196,29 +260,19 @@ fn strip_prefix_ignore_ascii_case<'a>(s: &'a str, prefix: &str) -> Option<&'a st
 
 #[inline]
 fn strip_isbn_prefix(s: &str) -> &str {
+    let rest = match strip_prefix_ignore_ascii_case(s, "isbn") {
+        Some(r) => r,
+        None => return s,
+    };
+
+    let offset = s.len() - rest.len();
+    let mut idx = match rest.as_bytes() {
+        [b'-', b'1', b'0' | b'3', b':', ..] => offset + 4,
+        [b':', ..] | [b' ', ..] => offset + 1,
+        _ => return s,
+    };
+
     let bytes = s.as_bytes();
-    if bytes.len() < 4 || !bytes[..4].eq_ignore_ascii_case(b"isbn") {
-        return s;
-    }
-
-    let mut idx = 4;
-    if idx < bytes.len() && bytes[idx] == b'-' {
-        // Expect "-10:" or "-13:" immediately after.
-        if idx + 3 < bytes.len()
-            && bytes[idx + 3] == b':'
-            && bytes[idx + 1] == b'1'
-            && (bytes[idx + 2] == b'0' || bytes[idx + 2] == b'3')
-        {
-            idx += 4;
-        } else {
-            return s;
-        }
-    } else if idx < bytes.len() && (bytes[idx] == b':' || bytes[idx] == b' ') {
-        idx += 1;
-    } else {
-        return s;
-    }
-
     while idx < bytes.len() && bytes[idx].is_ascii_whitespace() {
         idx += 1;
     }
@@ -246,55 +300,72 @@ fn trim_trailing_and_validate_last(s: &str) -> Option<&str> {
 
 #[inline]
 fn collect_isbn_digits(s: &str) -> Option<([u8; 13], usize)> {
+    if s.is_ascii() {
+        return collect_isbn_digits_ascii(s.as_bytes());
+    }
+
+    collect_isbn_digits_unicode(s)
+}
+
+#[inline]
+fn collect_isbn_digits_ascii(bytes: &[u8]) -> Option<([u8; 13], usize)> {
     let mut buf = [0u8; 13];
     let mut len = 0usize;
 
-    if s.is_ascii() {
-        for &b in s.as_bytes() {
-            match b {
-                b'-' => continue,
-                b if b.is_ascii_whitespace() => continue,
-                b @ b'0'..=b'9' => {
-                    if len >= buf.len() {
-                        return None;
-                    }
-                    buf[len] = b;
-                    len += 1;
+    for &b in bytes {
+        match b {
+            b'-' | b' ' | b'\t' | b'\n' | b'\r' => {}
+            b'0'..=b'9' => {
+                if len >= buf.len() {
+                    return None;
                 }
-                b @ b'x' | b @ b'X' => {
-                    if len != 9 || len >= buf.len() {
-                        return None;
-                    }
-                    buf[len] = b.to_ascii_uppercase();
-                    len += 1;
-                }
-                _ => return None,
+                buf[len] = b;
+                len += 1;
             }
+            b'x' | b'X' => {
+                if len != 9 || len >= buf.len() {
+                    return None;
+                }
+                buf[len] = b'X';
+                len += 1;
+            }
+            _ => return None,
         }
-        return Some((buf, len));
     }
 
-    for ch in s.chars() {
-        if ch == '-' || ch.is_whitespace() {
-            continue;
-        }
-        if !ch.is_ascii() {
-            return None;
-        }
-        let upper = ch.to_ascii_uppercase();
-        if upper.is_ascii_digit() || upper == 'X' {
-            if len >= buf.len() {
-                return None;
+    Some((buf, len))
+}
+
+#[inline]
+fn collect_isbn_digits_unicode(s: &str) -> Option<([u8; 13], usize)> {
+    let mut buf = [0u8; 13];
+    let mut len = 0usize;
+
+    s.chars()
+        .try_for_each(|ch| {
+            if ch == '-' || ch.is_whitespace() {
+                return Ok(());
             }
-            if upper == 'X' && len != 9 {
-                return None;
+            if !ch.is_ascii() {
+                return Err(());
             }
-            buf[len] = upper as u8;
+
+            let upper = ch.to_ascii_uppercase();
+            let val = match upper {
+                '0'..='9' => upper as u8,
+                'X' => b'X',
+                _ => return Err(()),
+            };
+
+            if len >= buf.len() || (val == b'X' && len != 9) {
+                return Err(());
+            }
+
+            buf[len] = val;
             len += 1;
-        } else {
-            return None;
-        }
-    }
+            Ok(())
+        })
+        .ok()?;
 
     Some((buf, len))
 }
