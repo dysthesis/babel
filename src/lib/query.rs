@@ -55,13 +55,7 @@ fn strip_outer_wrappers(s: &str) -> Option<&str> {
 }
 
 fn parse_doi_like<'a>(s: &'a str) -> Option<Cow<'a, str>> {
-    let (rest, _wrapped) = strip_doi_wrappers(s);
-    let lower = s.to_ascii_lowercase();
-    let has_prefix = lower.starts_with("http://doi.org/")
-        || lower.starts_with("https://doi.org/")
-        || lower.starts_with("http://dx.doi.org/")
-        || lower.starts_with("https://dx.doi.org/")
-        || lower.starts_with("urn:doi:");
+    let (rest, has_prefix) = strip_doi_wrappers(s);
 
     if has_prefix && !has_valid_percent_encoding(rest) {
         return None;
@@ -72,9 +66,16 @@ fn parse_doi_like<'a>(s: &'a str) -> Option<Cow<'a, str>> {
     }
 
     if has_prefix {
-        let decoded = percent_decode_str(rest).decode_utf8_lossy().into_owned();
-        let decoded = strip_doi_trailing_decor(&decoded).into_owned();
-        Some(Cow::Owned(decoded))
+        if !rest.as_bytes().contains(&b'%') {
+            return Some(strip_doi_trailing_decor(rest));
+        }
+
+        let decoded = percent_decode_str(rest).decode_utf8_lossy();
+        let trimmed = match strip_doi_trailing_decor(decoded.as_ref()) {
+            Cow::Borrowed(_) => Cow::Owned(decoded.into_owned()),
+            Cow::Owned(s) => Cow::Owned(s),
+        };
+        Some(trimmed)
     } else {
         Some(strip_doi_trailing_decor(rest))
     }
@@ -82,11 +83,16 @@ fn parse_doi_like<'a>(s: &'a str) -> Option<Cow<'a, str>> {
 
 #[inline]
 fn strip_doi_trailing_decor<'a>(s: &'a str) -> Cow<'a, str> {
-    let trimmed = s.trim_end_matches(['.', ',', ')']);
-    if trimmed.len() != s.len() {
-        Cow::Owned(trimmed.to_string())
-    } else {
-        Cow::Borrowed(s)
+    match s.as_bytes().last().copied() {
+        Some(b'.' | b',' | b')') => {
+            let trimmed = s.trim_end_matches(['.', ',', ')']);
+            if trimmed.len() != s.len() {
+                Cow::Owned(trimmed.to_string())
+            } else {
+                Cow::Borrowed(s)
+            }
+        }
+        _ => Cow::Borrowed(s),
     }
 }
 
@@ -231,16 +237,35 @@ fn strip_and_normalise_isbn_input(input: &str) -> Option<String> {
         return None;
     }
 
-    let digits: String = s
-        .chars()
-        .filter(|c| *c != '-' && !c.is_whitespace())
-        .collect::<String>()
-        .to_ascii_uppercase();
+    let mut buf = [0u8; 13];
+    let mut len = 0usize;
 
-    if is_valid_isbn_digits_only(&digits) {
-        Some(digits)
-    } else {
-        None
+    for ch in s.chars() {
+        if ch == '-' || ch.is_whitespace() {
+            continue;
+        }
+        let upper = ch.to_ascii_uppercase();
+        if upper.is_ascii_digit() || upper == 'X' {
+            if len >= buf.len() {
+                return None;
+            }
+            buf[len] = upper as u8;
+            len += 1;
+        } else {
+            return None;
+        }
+    }
+
+    match len {
+        10 | 13 => {
+            let canonical = String::from_utf8(buf[..len].to_vec()).ok()?;
+            if is_valid_isbn_digits_only(&canonical) {
+                Some(canonical)
+            } else {
+                None
+            }
+        }
+        _ => None,
     }
 }
 
@@ -370,6 +395,22 @@ mod tests {
         match Query::parse(&url) {
             Query::Doi(parsed) => assert_eq!(parsed.as_ref(), doi_name),
             other => panic!("expected DOI, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn doi_prefix_without_percent_is_borrowed() {
+        match Query::parse("https://doi.org/10.1000/xyz123") {
+            Query::Doi(Cow::Borrowed(s)) => assert_eq!(s, "10.1000/xyz123"),
+            other => panic!("expected borrowed DOI, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn doi_prefix_with_percent_is_owned() {
+        match Query::parse("urn:doi:10.1234/%C3%BCmlaut") {
+            Query::Doi(Cow::Owned(s)) => assert_eq!(s, "10.1234/ümlaut"),
+            other => panic!("expected owned decoded DOI, got {:?}", other),
         }
     }
 

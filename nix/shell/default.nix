@@ -25,6 +25,7 @@
         cargo-wizard
         bacon
         libllvm
+        gnuplot
 
         # Prose
         valeConfigured
