@@ -20,3 +20,4 @@ cc 14f712bba694d6df39a88fdaee6946655a46b72b811e645b3985215d0c916421 # shrinks to
 cc 5652fbf24df9e4a5a25bc12031dea0b89bb155d6f29608af41bd03e36b07cbc5 # shrinks to (input, expected) = ("🟠/.", "🟠/.")
 cc 525eb9e32e883c6cc483d2c993bbfc18de67de3d14fadd184dab426154f396d4 # shrinks to (input, expected) = ("0/!.", "0/!.")
 cc a7d105af11dc857fc5c116d0aa30102b6a042c00ece7c8fec5b460e60ddd9317 # shrinks to (input, expected) = ("!/!.", "!/!.")
+cc 31c71ff428b5edaf2e5121f1589f21393beba70a8ab44a7c05883ce63ce7ae35 # shrinks to (input, expected) = ("A/%2C", "A/%2C")

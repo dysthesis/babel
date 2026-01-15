@@ -81,6 +81,7 @@ dependencies = [
  "color-eyre",
  "criterion",
  "dhat",
+ "memchr",
  "percent-encoding",
  "proptest",
  "proptest-derive",

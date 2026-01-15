@@ -1,6 +1,7 @@
 #![allow(unexpected_cfgs)]
 
 use std::borrow::Cow;
+use memchr::memchr;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum DoiPrefixKind {
@@ -92,15 +93,26 @@ impl<'a> DoiStream<'a> {
 
     #[inline]
     fn process(mut self) -> Option<Cow<'a, str>> {
-        self.source
-            .as_bytes()
-            .iter()
-            .copied()
-            .enumerate()
-            .try_for_each(|(idx, byte)| self.consume(idx, byte))
-            .ok()?;
+        let bytes = self.source.as_bytes();
 
-        self.finish()
+        let slash = memchr(b'/', bytes)?;
+        if slash == 0 || slash + 1 == bytes.len() {
+            return None;
+        }
+        self.first_slash = Some(slash);
+
+        if self.validate_percent {
+            if !bytes.is_ascii() {
+                return self.process_per_byte(bytes);
+            }
+            return self.process_percent_fast(bytes);
+        }
+
+        if bytes.is_ascii() && !bytes.iter().any(|b| b.is_ascii_control() || b.is_ascii_whitespace()) {
+            return Some(Cow::Borrowed(self.source));
+        }
+
+        self.process_per_byte(bytes)
     }
 
     #[inline]
@@ -140,6 +152,64 @@ impl<'a> DoiStream<'a> {
             return Ok(());
         }
         self.record_unicode(idx)
+    }
+
+    #[inline]
+    fn process_per_byte(mut self, bytes: &[u8]) -> Option<Cow<'a, str>> {
+        bytes
+            .iter()
+            .copied()
+            .enumerate()
+            .try_for_each(|(idx, byte)| self.consume(idx, byte))
+            .ok()?;
+        self.finish()
+    }
+
+    #[inline]
+    fn process_percent_fast(mut self, bytes: &[u8]) -> Option<Cow<'a, str>> {
+        let mut i = 0;
+        while let Some(rel) = memchr(b'%', &bytes[i..]) {
+            let pct_idx = i + rel;
+
+            if bytes[i..pct_idx]
+                .iter()
+                .any(|b| b.is_ascii_control() || b.is_ascii_whitespace())
+            {
+                return None;
+            }
+
+            if self.out.is_none() {
+                self.ensure_out(pct_idx);
+            } else if pct_idx > i {
+                self.out.as_mut().unwrap().extend_from_slice(&bytes[i..pct_idx]);
+            }
+
+            if pct_idx + 2 >= bytes.len() {
+                return None;
+            }
+            let hi = bytes[pct_idx + 1];
+            let lo = bytes[pct_idx + 2];
+            if !(hi.is_ascii_hexdigit() && lo.is_ascii_hexdigit()) {
+                return None;
+            }
+            let decoded = (decode_hex(hi) << 4) | decode_hex(lo);
+            self.out.as_mut().unwrap().push(decoded);
+
+            i = pct_idx + 3;
+        }
+
+        if bytes[i..]
+            .iter()
+            .any(|b| b.is_ascii_control() || b.is_ascii_whitespace())
+        {
+            return None;
+        }
+
+        if let Some(ref mut out) = self.out {
+            out.extend_from_slice(&bytes[i..]);
+        }
+
+        self.finish()
     }
 
     #[inline]
@@ -213,16 +283,41 @@ fn decode_hex(h: u8) -> u8 {
 
 #[inline]
 fn strip_doi_trailing_decor_borrowed<'a>(s: &'a str) -> Cow<'a, str> {
-    match s.as_bytes().last().copied() {
-        Some(b'.' | b',' | b')') => {
-            let trimmed = s.trim_end_matches(['.', ',', ')']);
-            if trimmed.len() != s.len() {
-                Cow::Borrowed(trimmed)
-            } else {
-                Cow::Borrowed(s)
+    #[inline]
+    fn trim_len(bytes: &[u8]) -> usize {
+        let mut len = bytes.len();
+
+        while len > 0 {
+            match bytes[len - 1] {
+                b'.' | b',' | b')' => {
+                    len -= 1;
+                    continue;
+                }
+                _ => {
+                    if len >= 3 {
+                        let trio = &bytes[len - 3..len];
+                        if trio[0] == b'%' && trio[1].is_ascii_hexdigit() && trio[2].is_ascii_hexdigit()
+                        {
+                            let decoded = (decode_hex(trio[1]) << 4) | decode_hex(trio[2]);
+                            if matches!(decoded, b'.' | b',' | b')') {
+                                len -= 3;
+                                continue;
+                            }
+                        }
+                    }
+                    break;
+                }
             }
         }
-        _ => Cow::Borrowed(s),
+
+        len
+    }
+
+    let new_len = trim_len(s.as_bytes());
+    if new_len == s.len() {
+        Cow::Borrowed(s)
+    } else {
+        Cow::Borrowed(&s[..new_len])
     }
 }
 
@@ -231,7 +326,35 @@ fn strip_doi_trailing_decor_cow<'a>(s: Cow<'a, str>) -> Cow<'a, str> {
     match s {
         Cow::Borrowed(b) => strip_doi_trailing_decor_borrowed(b),
         Cow::Owned(mut o) => {
-            let new_len = o.trim_end_matches(['.', ',', ')']).len();
+            let new_len = {
+                let bytes = o.as_bytes();
+                // Reuse the same trimming logic as the borrowed path.
+                let mut len = bytes.len();
+                while len > 0 {
+                    match bytes[len - 1] {
+                        b'.' | b',' | b')' => {
+                            len -= 1;
+                            continue;
+                        }
+                        _ => {
+                            if len >= 3 {
+                                let trio = &bytes[len - 3..len];
+                                if trio[0] == b'%' && trio[1].is_ascii_hexdigit() && trio[2].is_ascii_hexdigit()
+                                {
+                                    let decoded = (decode_hex(trio[1]) << 4) | decode_hex(trio[2]);
+                                    if matches!(decoded, b'.' | b',' | b')') {
+                                        len -= 3;
+                                        continue;
+                                    }
+                                }
+                            }
+                            break;
+                        }
+                    }
+                }
+                len
+            };
+
             if new_len < o.len() {
                 o.truncate(new_len);
             }
