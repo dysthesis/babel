@@ -1,7 +1,17 @@
 #![allow(unexpected_cfgs)]
 
-use percent_encoding::percent_decode_str;
 use std::borrow::Cow;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum DoiPrefixKind {
+    None,
+    /// Plain `doi:` prefix – percent signs are treated literally.
+    Doi,
+    /// HTTP/HTTPS/DX prefixes where percent-escapes must be valid.
+    HttpLike,
+    /// `urn:doi:` prefix – percent-escapes must be valid.
+    Urn,
+}
 
 /// A query to search for entries. It can be a full-text search, or a direct
 /// identifier such as DOI or ISBN.
@@ -22,7 +32,7 @@ impl<'a> Query<'a> {
 
         // Try to parse the identifier as an ISBN.
         let isbn_view = trimmed;
-        if strip_and_normalise_isbn_input(isbn_view).is_some() {
+        if is_isbn_view_valid(isbn_view) {
             return Query::Isbn(Cow::Borrowed(isbn_view));
         }
 
@@ -34,11 +44,6 @@ impl<'a> Query<'a> {
         // It must be a full text query, then.
         Query::FullText(from)
     }
-}
-
-#[inline]
-fn strip_trailing_punct(s: &str) -> &str {
-    s.trim_end_matches(['.', ',', ';', ')', ']', '}'])
 }
 
 #[inline]
@@ -55,44 +60,120 @@ fn strip_outer_wrappers(s: &str) -> Option<&str> {
 }
 
 fn parse_doi_like<'a>(s: &'a str) -> Option<Cow<'a, str>> {
-    let (rest, has_prefix) = strip_doi_wrappers(s);
+    let (rest, prefix) = strip_doi_wrappers(s);
+    let validate_percent = matches!(prefix, DoiPrefixKind::HttpLike | DoiPrefixKind::Urn);
 
-    if has_prefix && !has_valid_percent_encoding(rest) {
-        return None;
-    }
+    process_doi(rest, validate_percent).map(strip_doi_trailing_decor_cow)
+}
 
-    if !looks_like_doi_name(rest) {
-        return None;
-    }
+#[inline]
+fn process_doi<'a>(s: &'a str, validate_percent: bool) -> Option<Cow<'a, str>> {
+    let bytes = s.as_bytes();
+    let mut first_slash: Option<usize> = None;
+    let mut out: Option<Vec<u8>> = None;
+    let mut i = 0;
 
-    if has_prefix {
-        if !rest.as_bytes().contains(&b'%') {
-            return Some(strip_doi_trailing_decor(rest));
+    while i < bytes.len() {
+        let b = bytes[i];
+        match b {
+            b'/' => {
+                if first_slash.is_none() {
+                    first_slash = Some(i);
+                }
+                if let Some(ref mut o) = out {
+                    o.push(b'/');
+                }
+                i += 1;
+            }
+            b'%' if validate_percent => {
+                if i + 2 >= bytes.len()
+                    || !bytes[i + 1].is_ascii_hexdigit()
+                    || !bytes[i + 2].is_ascii_hexdigit()
+                {
+                    return None;
+                }
+
+                let decode_hex = |h: u8| -> u8 {
+                    match h {
+                        b'0'..=b'9' => h - b'0',
+                        b'a'..=b'f' => 10 + (h - b'a'),
+                        b'A'..=b'F' => 10 + (h - b'A'),
+                        _ => unreachable!(),
+                    }
+                };
+
+                let v = (decode_hex(bytes[i + 1]) << 4) | decode_hex(bytes[i + 2]);
+
+                let o = out.get_or_insert_with(|| {
+                    let mut v = Vec::with_capacity(bytes.len());
+                    v.extend_from_slice(&bytes[..i]);
+                    v
+                });
+                o.push(v);
+                i += 3;
+            }
+            _ if b.is_ascii_control() || b.is_ascii_whitespace() => return None,
+            _ if b < 0x80 => {
+                if let Some(ref mut o) = out {
+                    o.push(b);
+                }
+                i += 1;
+            }
+            _ => {
+                if validate_percent {
+                    return None;
+                }
+                let ch = s[i..].chars().next().unwrap();
+                if ch.is_control() || ch.is_whitespace() {
+                    return None;
+                }
+                if let Some(ref mut o) = out {
+                    let mut buf = [0u8; 4];
+                    let n = ch.encode_utf8(&mut buf).len();
+                    o.extend_from_slice(&buf[..n]);
+                }
+                i += ch.len_utf8();
+            }
         }
+    }
 
-        let decoded = percent_decode_str(rest).decode_utf8_lossy();
-        let trimmed = match strip_doi_trailing_decor(decoded.as_ref()) {
-            Cow::Borrowed(_) => Cow::Owned(decoded.into_owned()),
-            Cow::Owned(s) => Cow::Owned(s),
-        };
-        Some(trimmed)
-    } else {
-        Some(strip_doi_trailing_decor(rest))
+    let slash = first_slash?;
+    if slash == 0 || slash == bytes.len() - 1 {
+        return None;
+    }
+
+    match out {
+        None => Some(Cow::Borrowed(s)),
+        Some(v) => String::from_utf8(v).ok().map(Cow::Owned),
     }
 }
 
 #[inline]
-fn strip_doi_trailing_decor<'a>(s: &'a str) -> Cow<'a, str> {
+fn strip_doi_trailing_decor_borrowed<'a>(s: &'a str) -> Cow<'a, str> {
     match s.as_bytes().last().copied() {
         Some(b'.' | b',' | b')') => {
             let trimmed = s.trim_end_matches(['.', ',', ')']);
             if trimmed.len() != s.len() {
-                Cow::Owned(trimmed.to_string())
+                Cow::Borrowed(trimmed)
             } else {
                 Cow::Borrowed(s)
             }
         }
         _ => Cow::Borrowed(s),
+    }
+}
+
+#[inline]
+fn strip_doi_trailing_decor_cow<'a>(s: Cow<'a, str>) -> Cow<'a, str> {
+    match s {
+        Cow::Borrowed(b) => strip_doi_trailing_decor_borrowed(b),
+        Cow::Owned(mut o) => {
+            let new_len = o.trim_end_matches(['.', ',', ')']).len();
+            if new_len < o.len() {
+                o.truncate(new_len);
+            }
+            Cow::Owned(o)
+        }
     }
 }
 
@@ -113,23 +194,147 @@ fn strip_prefix_ignore_ascii_case<'a>(s: &'a str, prefix: &str) -> Option<&'a st
     }
 }
 
-fn has_valid_percent_encoding(s: &str) -> bool {
+#[inline]
+fn strip_isbn_prefix(s: &str) -> &str {
     let bytes = s.as_bytes();
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'%' {
-            if i + 2 >= bytes.len()
-                || !bytes[i + 1].is_ascii_hexdigit()
-                || !bytes[i + 2].is_ascii_hexdigit()
-            {
-                return false;
-            }
-            i += 3;
+    if bytes.len() < 4 || !bytes[..4].eq_ignore_ascii_case(b"isbn") {
+        return s;
+    }
+
+    let mut idx = 4;
+    if idx < bytes.len() && bytes[idx] == b'-' {
+        // Expect "-10:" or "-13:" immediately after.
+        if idx + 3 < bytes.len()
+            && bytes[idx + 3] == b':'
+            && bytes[idx + 1] == b'1'
+            && (bytes[idx + 2] == b'0' || bytes[idx + 2] == b'3')
+        {
+            idx += 4;
         } else {
-            i += 1;
+            return s;
+        }
+    } else if idx < bytes.len() && (bytes[idx] == b':' || bytes[idx] == b' ') {
+        idx += 1;
+    } else {
+        return s;
+    }
+
+    while idx < bytes.len() && bytes[idx].is_ascii_whitespace() {
+        idx += 1;
+    }
+
+    &s[idx..]
+}
+
+#[inline]
+fn trim_trailing_and_validate_last(s: &str) -> Option<&str> {
+    let bytes = s.as_bytes();
+    let mut end = bytes.len();
+    while end > 0 {
+        let b = bytes[end - 1];
+        if b.is_ascii_whitespace() || matches!(b, b'.' | b',' | b';' | b')' | b']' | b'}') {
+            end -= 1;
+            continue;
+        }
+        if !(b.is_ascii_digit() || b == b'X' || b == b'x') {
+            return None;
+        }
+        return Some(&s[..end]);
+    }
+    None
+}
+
+#[inline]
+fn collect_isbn_digits(s: &str) -> Option<([u8; 13], usize)> {
+    let mut buf = [0u8; 13];
+    let mut len = 0usize;
+
+    if s.is_ascii() {
+        for &b in s.as_bytes() {
+            match b {
+                b'-' => continue,
+                b if b.is_ascii_whitespace() => continue,
+                b @ b'0'..=b'9' => {
+                    if len >= buf.len() {
+                        return None;
+                    }
+                    buf[len] = b;
+                    len += 1;
+                }
+                b @ b'x' | b @ b'X' => {
+                    if len != 9 || len >= buf.len() {
+                        return None;
+                    }
+                    buf[len] = b.to_ascii_uppercase();
+                    len += 1;
+                }
+                _ => return None,
+            }
+        }
+        return Some((buf, len));
+    }
+
+    for ch in s.chars() {
+        if ch == '-' || ch.is_whitespace() {
+            continue;
+        }
+        if !ch.is_ascii() {
+            return None;
+        }
+        let upper = ch.to_ascii_uppercase();
+        if upper.is_ascii_digit() || upper == 'X' {
+            if len >= buf.len() {
+                return None;
+            }
+            if upper == 'X' && len != 9 {
+                return None;
+            }
+            buf[len] = upper as u8;
+            len += 1;
+        } else {
+            return None;
         }
     }
-    true
+
+    Some((buf, len))
+}
+
+#[inline]
+fn validate_isbn_buffer(buf: [u8; 13], len: usize) -> Option<([u8; 13], usize)> {
+    match len {
+        10 => {
+            let mut first9 = [0u8; 9];
+            for i in 0..9 {
+                let b = buf[i];
+                if !b.is_ascii_digit() {
+                    return None;
+                }
+                first9[i] = b - b'0';
+            }
+            let expected = isbn10_check_digit(&first9);
+            let last = buf[9] as char;
+            if last.to_ascii_uppercase() != expected {
+                return None;
+            }
+            Some((buf, len))
+        }
+        13 => {
+            let mut first12 = [0u8; 12];
+            for i in 0..12 {
+                let b = buf[i];
+                if !b.is_ascii_digit() {
+                    return None;
+                }
+                first12[i] = b - b'0';
+            }
+            let expected = isbn13_check_digit(&first12);
+            if (buf[12] - b'0') != expected {
+                return None;
+            }
+            Some((buf, len))
+        }
+        _ => None,
+    }
 }
 
 #[inline]
@@ -161,126 +366,27 @@ fn isbn13_check_digit(first12: &[u8; 12]) -> u8 {
     ((10 - (sum % 10)) % 10) as u8
 }
 
-#[inline]
-fn is_valid_isbn10_digits_only(s: &str) -> bool {
-    let bytes = s.as_bytes();
-    let mut digits = [0u8; 9];
-
-    for i in 0..9 {
-        if !bytes[i].is_ascii_digit() {
-            return false;
-        }
-        digits[i] = bytes[i] - b'0';
-    }
-
-    let expected = isbn10_check_digit(&digits);
-    let last = s.chars().last().unwrap();
-    last.to_ascii_uppercase() == expected
+fn is_isbn_view_valid(input: &str) -> bool {
+    parse_isbn_digits(input).is_some()
 }
 
 #[inline]
-fn is_valid_isbn13_digits_only(s: &str) -> bool {
-    let bytes = s.as_bytes();
-    if !bytes.iter().all(|b| b.is_ascii_digit()) {
-        return false;
-    }
-
-    let mut digits = [0u8; 12];
-    for i in 0..12 {
-        digits[i] = bytes[i] - b'0';
-    }
-
-    let expected = isbn13_check_digit(&digits);
-    (bytes[12] - b'0') == expected
-}
-
-pub(crate) fn is_valid_isbn_digits_only(s: &str) -> bool {
-    match s.len() {
-        10 => is_valid_isbn10_digits_only(s),
-        13 => is_valid_isbn13_digits_only(s),
-        _ => false,
-    }
-}
-
-fn strip_and_normalise_isbn_input(input: &str) -> Option<String> {
-    // Trim surrounding whitespace and unwrap any single set of wrapping
-    // brackets/parentheses that often surround ISBNs in prose.
+fn parse_isbn_digits(input: &str) -> Option<([u8; 13], usize)> {
     let mut s = input.trim();
 
-    loop {
-        if let Some(stripped) = strip_outer_wrappers(s) {
-            s = stripped.trim();
-        } else {
-            break;
-        }
+    while let Some(stripped) = strip_outer_wrappers(s) {
+        s = stripped.trim();
     }
 
-    // Drop sentence-ending punctuation like '.' that may follow the ISBN.
-    s = strip_trailing_punct(s);
+    s = strip_isbn_prefix(s);
 
-    let s = s
-        .strip_prefix("ISBN-10:")
-        .or_else(|| s.strip_prefix("ISBN-13:"))
-        .or_else(|| s.strip_prefix("ISBN:"))
-        .or_else(|| s.strip_prefix("isbn:"))
-        .or_else(|| s.strip_prefix("ISBN "))
-        .unwrap_or(s)
-        .trim();
+    s = trim_trailing_and_validate_last(s)?;
 
-    // Reject obviously dangling separators: after trimming, the last
-    // non-space must be a digit or 'X'/'x'.
-    if let Some(last) = s.chars().rev().find(|c| !c.is_whitespace()) {
-        if !(last.is_ascii_digit() || last.eq_ignore_ascii_case(&'x')) {
-            return None;
-        }
-    } else {
-        return None;
-    }
-
-    let mut buf = [0u8; 13];
-    let mut len = 0usize;
-
-    for ch in s.chars() {
-        if ch == '-' || ch.is_whitespace() {
-            continue;
-        }
-        let upper = ch.to_ascii_uppercase();
-        if upper.is_ascii_digit() || upper == 'X' {
-            if len >= buf.len() {
-                return None;
-            }
-            buf[len] = upper as u8;
-            len += 1;
-        } else {
-            return None;
-        }
-    }
-
-    match len {
-        10 | 13 => {
-            let canonical = String::from_utf8(buf[..len].to_vec()).ok()?;
-            if is_valid_isbn_digits_only(&canonical) {
-                Some(canonical)
-            } else {
-                None
-            }
-        }
-        _ => None,
-    }
+    let (buf, len) = collect_isbn_digits(s)?;
+    validate_isbn_buffer(buf, len)
 }
 
-fn looks_like_doi_name(s: &str) -> bool {
-    let mut it = s.splitn(2, '/');
-    let prefix = it.next().unwrap_or("");
-    let suffix = it.next().unwrap_or("");
-    if prefix.is_empty() || suffix.is_empty() {
-        return false;
-    }
-    !prefix.chars().any(|c| c.is_control() || c.is_whitespace())
-        && !suffix.chars().any(|c| c.is_control() || c.is_whitespace())
-}
-
-fn strip_doi_wrappers(s: &str) -> (&str, bool) {
+fn strip_doi_wrappers(s: &str) -> (&str, DoiPrefixKind) {
     const WRAPPERS: [&str; 6] = [
         "doi:",
         "urn:doi:",
@@ -292,11 +398,16 @@ fn strip_doi_wrappers(s: &str) -> (&str, bool) {
 
     for w in WRAPPERS {
         if let Some(rest) = strip_prefix_ignore_ascii_case(s, w) {
-            return (rest, true);
+            let kind = match w {
+                "doi:" => DoiPrefixKind::Doi,
+                "urn:doi:" => DoiPrefixKind::Urn,
+                _ => DoiPrefixKind::HttpLike,
+            };
+            return (rest, kind);
         }
     }
 
-    (s, false)
+    (s, DoiPrefixKind::None)
 }
 
 #[cfg(test)]
@@ -337,6 +448,21 @@ mod tests {
         "😀9780306406157",         // emoji prefix
     ];
 
+    #[inline]
+    fn strip_doi_trailing_decor<'a>(s: &'a str) -> Cow<'a, str> {
+        strip_doi_trailing_decor_borrowed(s)
+    }
+
+    #[inline]
+    fn strip_and_normalise_isbn_input(input: &str) -> Option<String> {
+        let (digits, len) = parse_isbn_digits(input)?;
+        let mut canonical = String::with_capacity(len);
+        for &d in digits.iter().take(len) {
+            canonical.push(char::from(d));
+        }
+        Some(canonical)
+    }
+
     #[test]
     fn strip_outer_wrappers_handles_too_short() {
         assert_eq!(strip_outer_wrappers(""), None);
@@ -361,11 +487,8 @@ mod tests {
     #[test]
     fn invalid_isbn_fixtures_rejected() {
         for input in INVALID_ISBN_CASES {
-            match Query::parse(input) {
-                Query::Isbn(parsed) => {
-                    panic!("unexpected ISBN parse for {:?}, parsed {:?}", input, parsed);
-                }
-                _ => {}
+            if let Query::Isbn(parsed) = Query::parse(input) {
+                panic!("unexpected ISBN parse for {input:?}, parsed {parsed:?}")
             }
         }
     }
