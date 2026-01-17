@@ -19,6 +19,8 @@ pub enum Command {
         /// The Discord bot token to use
         #[arg(short, long, value_name = "TOKEN")]
         token: String,
+        #[arg(short, long, value_name = "GUILD_ID")]
+        guild_id: u64,
     },
     /// Fetch an item.
     Fetch {
