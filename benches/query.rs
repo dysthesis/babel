@@ -23,7 +23,7 @@ const DOI_PREFIX_PLAIN: &[&str] = &[
 ];
 
 // Prefixed DOIs that require percent-decoding.
-const DOI_PREFIX_PCT: &[&str] = &[
+const DOI_PREFIX_PERCENT: &[&str] = &[
     "https://doi.org/10.1234/%C3%BCmlaut",
     "urn:doi:10.1234/%C3%BCmlaut",
 ];
@@ -124,8 +124,8 @@ fn doi_prefixed_plain(c: &mut Criterion) {
     bench_group_inputs(c, "doi_prefixed_plain", DOI_PREFIX_PLAIN);
 }
 
-fn doi_prefixed_pct(c: &mut Criterion) {
-    bench_group_inputs(c, "doi_prefixed_pct", DOI_PREFIX_PCT);
+fn doi_prefixed_percent(c: &mut Criterion) {
+    bench_group_inputs(c, "doi_prefixed_percent", DOI_PREFIX_PERCENT);
 }
 
 fn doi_invalid(c: &mut Criterion) {
@@ -171,7 +171,7 @@ criterion_group! {
     targets =
         doi_valid,
         doi_prefixed_plain,
-        doi_prefixed_pct,
+        doi_prefixed_percent,
         doi_invalid,
         isbn10_valid,
         isbn13_valid,
