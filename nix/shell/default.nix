@@ -26,6 +26,7 @@
         bacon
         libllvm
         gnuplot
+        perf
 
         # Prose
         valeConfigured
